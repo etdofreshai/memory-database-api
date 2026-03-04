@@ -45,15 +45,19 @@ async function bootstrap() {
     )
   `);
 
-  // Bootstrap admin token if ADMIN_TOKEN env var set and no admin tokens exist
-  const existing = await pool.query("SELECT id FROM api_tokens WHERE permissions = 'admin' AND is_active = true LIMIT 1");
+  // Bootstrap admin token
+  const adminTokenEnv = process.env.ADMIN_TOKEN;
+  const existing = await pool.query("SELECT id, token FROM api_tokens WHERE label = 'Bootstrap Admin' AND permissions = 'admin' LIMIT 1");
   if (existing.rows.length === 0) {
-    const token = process.env.ADMIN_TOKEN || crypto.randomBytes(32).toString('hex');
+    const token = adminTokenEnv || crypto.randomBytes(32).toString('hex');
     await pool.query(
       'INSERT INTO api_tokens (token, label, permissions) VALUES ($1, $2, $3)',
       [token, 'Bootstrap Admin', 'admin']
     );
     console.log(`\n🔑 Admin token created: ${token}\n`);
+  } else if (adminTokenEnv && existing.rows[0].token !== adminTokenEnv) {
+    await pool.query('UPDATE api_tokens SET token = $1 WHERE id = $2', [adminTokenEnv, existing.rows[0].id]);
+    console.log(`\n🔑 Admin token updated from ADMIN_TOKEN env var\n`);
   }
 
   app.listen(PORT, () => {
