@@ -103,7 +103,6 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
     const dataResult = await pool.query(
       `SELECT m.id, m.source_id, m.sender, m.recipient, m.content, m.timestamp, m.metadata,
               m.external_id, m.created_at,
-              CASE WHEN m.embedding IS NOT NULL THEN (m.embedding::text) ELSE NULL END as embedding_raw,
               s.name as source_name FROM messages m
        LEFT JOIN sources s ON m.source_id = s.id
        ${where}
@@ -112,15 +111,9 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
       [...params, parsedLimit, parsedOffset]
     );
 
-    // Truncate embedding to first 5 values for preview
+    // Add embedding_preview placeholder (no embedding column yet)
     for (const row of dataResult.rows) {
-      if (row.embedding_raw) {
-        const nums = row.embedding_raw.replace(/[\[\]]/g, '').split(',').slice(0, 5).map((n: string) => parseFloat(n).toFixed(4));
-        row.embedding_preview = `[${nums.join(', ')}…]`;
-      } else {
-        row.embedding_preview = null;
-      }
-      delete row.embedding_raw;
+      row.embedding_preview = null;
     }
 
     const totalPages = Math.max(1, Math.ceil(total / parsedLimit));
