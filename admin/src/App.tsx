@@ -6,11 +6,18 @@ interface Token {
   created_at: string; last_used_at: string | null; is_active: boolean; token?: string;
 }
 
+interface Source {
+  id: number; name: string;
+}
+
 const BASE = import.meta.env.BASE_URL.replace(/\/admin\/?$/, '');
 
 function AdminPanel() {
   const [adminToken, setAdminToken] = useState(localStorage.getItem('admin_token') || '');
   const [tokens, setTokens] = useState<Token[]>([]);
+  const [sources, setSources] = useState<Source[]>([]);
+  const [editingSource, setEditingSource] = useState<number | null>(null);
+  const [editSourceName, setEditSourceName] = useState('');
   const [newLabel, setNewLabel] = useState('');
   const [newPerm, setNewPerm] = useState('read');
   const [newSources, setNewSources] = useState('');
@@ -30,7 +37,25 @@ function AdminPanel() {
     } catch { setError('Connection error'); }
   }
 
-  useEffect(() => { loadTokens(); }, [adminToken]);
+  async function loadSources() {
+    if (!adminToken) return;
+    try {
+      const res = await fetch(`${BASE}/api/sources`, { headers: headers() });
+      if (res.ok) { const data = await res.json(); setSources(data.sources); }
+    } catch {}
+  }
+
+  function startEditSource(s: Source) {
+    setEditingSource(s.id);
+    setEditSourceName(s.name);
+  }
+
+  async function saveSource(id: number) {
+    const res = await fetch(`${BASE}/api/sources/${id}`, { method: 'PATCH', headers: headers(), body: JSON.stringify({ name: editSourceName }) });
+    if (res.ok) { setEditingSource(null); loadSources(); } else { setError('Failed to update source'); }
+  }
+
+  useEffect(() => { loadTokens(); loadSources(); }, [adminToken]);
 
   async function createToken() {
     const body: any = { label: newLabel, permissions: newPerm };
@@ -74,6 +99,28 @@ function AdminPanel() {
       {createdToken && <div style={{ background: '#e8f5e9', padding: 12, borderRadius: 4, marginBottom: 16, wordBreak: 'break-all' }}>
         <strong>New token:</strong> <code>{createdToken}</code><br /><small>Copy now — won't be shown again</small>
       </div>}
+
+      <h2>Sources</h2>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '2rem' }}>
+        <thead><tr>{['ID','Name',''].map(h => <th key={h} style={{ textAlign: 'left', borderBottom: '2px solid #ccc', padding: 4 }}>{h}</th>)}</tr></thead>
+        <tbody>{sources.map(s => (
+          <tr key={s.id}>
+            <td style={{ padding: 4 }}>{s.id}</td>
+            <td style={{ padding: 4 }}>
+              {editingSource === s.id
+                ? <span style={{ display: 'flex', gap: 4 }}>
+                    <input value={editSourceName} onChange={e => setEditSourceName(e.target.value)} style={{ width: 200 }} onKeyDown={e => e.key === 'Enter' && saveSource(s.id)} />
+                    <button onClick={() => saveSource(s.id)} style={{ fontSize: 12 }}>Save</button>
+                    <button onClick={() => setEditingSource(null)} style={{ fontSize: 12 }}>Cancel</button>
+                  </span>
+                : s.name}
+            </td>
+            <td style={{ padding: 4 }}>
+              {editingSource !== s.id && <button onClick={() => startEditSource(s)} style={{ fontSize: 12, cursor: 'pointer', background: 'none', border: 'none' }} title="Edit">✏️</button>}
+            </td>
+          </tr>
+        ))}</tbody>
+      </table>
 
       <h2>Tokens</h2>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
