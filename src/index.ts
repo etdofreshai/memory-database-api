@@ -71,7 +71,7 @@ async function bootstrap() {
   });
 }
 
-async function startWithRetry(retries = 10, delayMs = 3000) {
+async function startWithRetry(retries = 30, delayMs = 5000) {
   for (let i = 0; i < retries; i++) {
     try {
       await bootstrap();
