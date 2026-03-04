@@ -71,7 +71,21 @@ async function bootstrap() {
   });
 }
 
-bootstrap().catch(err => {
-  console.error('Failed to start:', err);
-  process.exit(1);
-});
+async function startWithRetry(retries = 10, delayMs = 3000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await bootstrap();
+      return;
+    } catch (err: any) {
+      if (err.code === '57P03' && i < retries - 1) {
+        console.log(`DB not ready (attempt ${i + 1}/${retries}), retrying in ${delayMs / 1000}s...`);
+        await new Promise(r => setTimeout(r, delayMs));
+      } else {
+        console.error('Failed to start:', err);
+        process.exit(1);
+      }
+    }
+  }
+}
+
+startWithRetry();
