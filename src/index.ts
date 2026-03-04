@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pool from './db.js';
@@ -44,6 +45,11 @@ async function bootstrap() {
       is_active BOOLEAN DEFAULT TRUE
     )
   `);
+
+  // Run embedding migration
+  const embeddingMigrationPath = path.join(__dirname, '../migrations/002-add-embedding.sql');
+  const embeddingMigrationSql = fs.readFileSync(embeddingMigrationPath, 'utf8');
+  await pool.query(embeddingMigrationSql);
 
   // Bootstrap admin token
   const adminTokenEnv = process.env.ADMIN_TOKEN;

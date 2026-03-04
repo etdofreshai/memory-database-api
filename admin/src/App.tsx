@@ -10,6 +10,13 @@ interface Source {
   id: number; name: string;
 }
 
+interface EmbeddingStatus {
+  total: number;
+  embedded: number;
+  remaining: number;
+  percentage: number;
+}
+
 const BASE = import.meta.env.BASE_URL.replace(/\/admin\/?$/, '');
 
 function AdminPanel() {
@@ -28,6 +35,12 @@ function AdminPanel() {
   const [createdToken, setCreatedToken] = useState('');
   const [error, setError] = useState('');
 
+  const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatus | null>(null);
+  const [batchSize, setBatchSize] = useState(50);
+  const [limit, setLimit] = useState(1000);
+  const [isBackfilling, setIsBackfilling] = useState(false);
+  const [pollStatus, setPollStatus] = useState(false);
+
   const headers = () => ({ 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' });
 
   async function loadTokens() {
@@ -39,6 +52,18 @@ function AdminPanel() {
       setTokens(data.tokens);
       setError('');
     } catch { setError('Connection error'); }
+  }
+
+  async function loadEmbeddingStatus() {
+    if (!adminToken) return;
+    try {
+      const res = await fetch(`${BASE}/api/admin/embeddings/status`, { headers: headers() });
+      if (!res.ok) return;
+      const data = await res.json();
+      setEmbeddingStatus(data);
+    } catch {
+      // no-op
+    }
   }
 
   async function loadSources() {
@@ -73,7 +98,15 @@ function AdminPanel() {
     if (res.ok) { setEditingToken(null); loadTokens(); } else { setError('Failed to update token'); }
   }
 
-  useEffect(() => { loadTokens(); loadSources(); }, [adminToken]);
+  useEffect(() => { loadTokens(); loadSources(); loadEmbeddingStatus(); }, [adminToken]);
+
+  useEffect(() => {
+    if (!pollStatus || !adminToken) return;
+    const timer = setInterval(() => {
+      loadEmbeddingStatus();
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [pollStatus, adminToken]);
 
   async function createToken() {
     const body: any = { label: newLabel, permissions: newPerm };
@@ -91,7 +124,36 @@ function AdminPanel() {
     loadTokens();
   }
 
-  const saveToken = () => { localStorage.setItem('admin_token', adminToken); loadTokens(); };
+  async function runBackfill() {
+    if (isBackfilling) return;
+    setIsBackfilling(true);
+    setPollStatus(true);
+    setError('');
+
+    try {
+      const res = await fetch(`${BASE}/api/admin/embeddings/backfill`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ batchSize, limit })
+      });
+      if (!res.ok) {
+        throw new Error('Backfill failed');
+      }
+      await loadEmbeddingStatus();
+    } catch (err: any) {
+      setError(err?.message || 'Backfill failed');
+    } finally {
+      setIsBackfilling(false);
+      setPollStatus(false);
+    }
+  }
+
+  function stopPolling() {
+    setPollStatus(false);
+    setIsBackfilling(false);
+  }
+
+  const saveToken = () => { localStorage.setItem('admin_token', adminToken); loadTokens(); loadEmbeddingStatus(); };
 
   return (
     <div style={{ fontFamily: 'system-ui', maxWidth: 800, margin: '2rem auto', padding: '0 1rem' }}>
@@ -153,6 +215,27 @@ function AdminPanel() {
           </tr>
         ))}</tbody>
       </table>
+
+      <h2 style={{ marginTop: 24 }}>Embeddings</h2>
+      <div style={{ border: '1px solid #ddd', borderRadius: 6, padding: 12, marginBottom: 24 }}>
+        <p style={{ margin: '0 0 8px' }}>
+          Total: <strong>{embeddingStatus?.total ?? 0}</strong> · Embedded: <strong>{embeddingStatus?.embedded ?? 0}</strong> · Remaining: <strong>{embeddingStatus?.remaining ?? 0}</strong>
+        </p>
+        <div style={{ width: '100%', background: '#f1f1f1', borderRadius: 6, overflow: 'hidden', height: 14, marginBottom: 8 }}>
+          <div style={{ width: `${Math.max(0, Math.min(100, embeddingStatus?.percentage ?? 0))}%`, height: '100%', background: '#4caf50' }} />
+        </div>
+        <p style={{ marginTop: 0 }}>{embeddingStatus?.percentage?.toFixed(2) ?? '0.00'}%</p>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label>Batch size</label>
+          <input type="number" min={1} value={batchSize} onChange={e => setBatchSize(Number(e.target.value) || 50)} style={{ width: 90 }} />
+          <label>Limit</label>
+          <input type="number" min={1} value={limit} onChange={e => setLimit(Number(e.target.value) || 1000)} style={{ width: 110 }} />
+          <button onClick={runBackfill} disabled={isBackfilling}>{isBackfilling ? 'Backfilling…' : 'Backfill'}</button>
+          <button onClick={stopPolling} disabled={!isBackfilling && !pollStatus}>Stop</button>
+          <button onClick={loadEmbeddingStatus}>Refresh</button>
+        </div>
+      </div>
     </div>
   );
 }

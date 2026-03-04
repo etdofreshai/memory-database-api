@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import pool from '../db.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { generateEmbedding } from '../embeddings.js';
 
 const router = Router();
 
@@ -24,12 +25,17 @@ router.get('/search', requireAuth('read', 'write', 'admin'), async (req, res) =>
 
 // Vector search
 router.get('/vector-search', requireAuth('read', 'write', 'admin'), async (req, res) => {
-  const { embedding, limit = 10 } = req.body || {};
-  if (!embedding || !Array.isArray(embedding)) {
-    res.status(400).json({ error: 'embedding array required in body' }); return;
+  const q = (req.body?.q ?? req.query?.q ?? '').toString().trim();
+  const limit = Number(req.body?.limit ?? req.query?.limit ?? 10);
+
+  if (!q) {
+    res.status(400).json({ error: 'q is required' }); return;
   }
+
   try {
+    const embedding = await generateEmbedding(q);
     const vecStr = `[${embedding.join(',')}]`;
+
     const result = await pool.query(
       `SELECT m.*, s.name as source_name,
        m.embedding <=> $1::vector as distance
@@ -38,11 +44,14 @@ router.get('/vector-search', requireAuth('read', 'write', 'admin'), async (req, 
        WHERE m.embedding IS NOT NULL
        ORDER BY m.embedding <=> $1::vector
        LIMIT $2`,
-      [vecStr, Number(limit)]
+      [vecStr, Math.max(1, Math.min(limit || 10, 200))]
     );
+
     res.json({ messages: result.rows });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    const msg = err?.message || 'Embedding generation failed';
+    const status = msg.includes('Ollama') ? 503 : 500;
+    res.status(status).json({ error: msg });
   }
 });
 
@@ -103,18 +112,15 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
     const dataResult = await pool.query(
       `SELECT m.id, m.source_id, m.sender, m.recipient, m.content, m.timestamp, m.metadata,
               m.external_id, m.created_at,
-              s.name as source_name FROM messages m
+              s.name as source_name,
+              CASE WHEN m.embedding IS NOT NULL THEN LEFT(m.embedding::text, 60) ELSE NULL END as embedding_preview
+       FROM messages m
        LEFT JOIN sources s ON m.source_id = s.id
        ${where}
        ORDER BY ${sortColumn} ${sortOrder}
        LIMIT $${idx++} OFFSET $${idx++}`,
       [...params, parsedLimit, parsedOffset]
     );
-
-    // Add embedding_preview placeholder (no embedding column yet)
-    for (const row of dataResult.rows) {
-      row.embedding_preview = null;
-    }
 
     const totalPages = Math.max(1, Math.ceil(total / parsedLimit));
     const currentPage = Math.floor(parsedOffset / parsedLimit) + 1;
