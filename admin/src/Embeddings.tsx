@@ -27,7 +27,7 @@ export default function Embeddings() {
   const [tokenInput, setTokenInput] = useState(localStorage.getItem('admin_token') || '');
   const [status, setStatus] = useState<EmbeddingStatus | null>(null);
   const [batchSize, setBatchSize] = useState(50);
-  const [limit, setLimit] = useState(1000);
+  const [limit, setLimit] = useState(1000000);
   const [isPolling, setIsPolling] = useState(false);
   const [error, setError] = useState('');
 
