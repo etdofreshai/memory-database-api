@@ -46,9 +46,21 @@ router.get('/vector-search', requireAuth('read', 'write', 'admin'), async (req, 
   }
 });
 
-// List/filter messages
+// List/filter messages with pagination + sorting + search
 router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
-  const { source, sender, after, before, limit = '20', offset = '0' } = req.query;
+  const {
+    source,
+    sender,
+    after,
+    before,
+    q,
+    page,
+    limit = '20',
+    offset,
+    sort = 'timestamp',
+    order = 'desc'
+  } = req.query;
+
   const conditions: string[] = [];
   const params: any[] = [];
   let idx = 1;
@@ -57,18 +69,55 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
   if (sender) { conditions.push(`m.sender ILIKE $${idx++}`); params.push(`%${sender}%`); }
   if (after) { conditions.push(`m.timestamp >= $${idx++}`); params.push(after); }
   if (before) { conditions.push(`m.timestamp <= $${idx++}`); params.push(before); }
+  if (q) {
+    conditions.push(`(m.content ILIKE $${idx} OR m.sender ILIKE $${idx} OR m.recipient ILIKE $${idx})`);
+    params.push(`%${q}%`);
+    idx++;
+  }
 
   const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
+  const parsedLimit = Math.max(1, Math.min(Number(limit) || 20, 200));
+  const parsedPage = Math.max(1, Number(page) || 1);
+  const parsedOffset = offset !== undefined ? Math.max(0, Number(offset) || 0) : (parsedPage - 1) * parsedLimit;
+
+  const allowedSorts = new Set(['id', 'timestamp', 'sender', 'recipient', 'content', 'source']);
+  const sortKey = String(sort).toLowerCase();
+  const sortColumn = !allowedSorts.has(sortKey)
+    ? 'm.timestamp'
+    : sortKey === 'source'
+      ? 's.name'
+      : `m.${sortKey}`;
+
+  const sortOrder = String(order).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
   try {
-    const result = await pool.query(
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int as total FROM messages m
+       LEFT JOIN sources s ON m.source_id = s.id
+       ${where}`,
+      params
+    );
+    const total = countResult.rows[0]?.total || 0;
+
+    const dataResult = await pool.query(
       `SELECT m.*, s.name as source_name FROM messages m
        LEFT JOIN sources s ON m.source_id = s.id
        ${where}
-       ORDER BY m.timestamp DESC LIMIT $${idx++} OFFSET $${idx++}`,
-      [...params, Number(limit), Number(offset)]
+       ORDER BY ${sortColumn} ${sortOrder}
+       LIMIT $${idx++} OFFSET $${idx++}`,
+      [...params, parsedLimit, parsedOffset]
     );
-    res.json({ messages: result.rows });
+
+    const totalPages = Math.max(1, Math.ceil(total / parsedLimit));
+    const currentPage = Math.floor(parsedOffset / parsedLimit) + 1;
+
+    res.json({
+      messages: dataResult.rows,
+      total,
+      page: currentPage,
+      totalPages
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

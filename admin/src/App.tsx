@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Viewer from './Viewer.js';
 
 interface Token {
   id: number; label: string; permissions: string; write_sources: string[] | null;
@@ -7,7 +8,7 @@ interface Token {
 
 const BASE = import.meta.env.BASE_URL.replace(/\/admin\/?$/, '');
 
-export default function App() {
+function AdminPanel() {
   const [adminToken, setAdminToken] = useState(localStorage.getItem('admin_token') || '');
   const [tokens, setTokens] = useState<Token[]>([]);
   const [newLabel, setNewLabel] = useState('');
@@ -52,6 +53,9 @@ export default function App() {
   return (
     <div style={{ fontFamily: 'system-ui', maxWidth: 800, margin: '2rem auto', padding: '0 1rem' }}>
       <h1>🧠 Memory API Admin</h1>
+      <div style={{ marginBottom: 12 }}>
+        <a href={`${BASE}/admin/viewer`}>Open Viewer →</a>
+      </div>
       <div style={{ marginBottom: '1rem' }}>
         <input placeholder="Admin token" type="password" value={adminToken} onChange={e => setAdminToken(e.target.value)} style={{ width: 400, marginRight: 8 }} />
         <button onClick={saveToken}>Connect</button>
@@ -89,4 +93,12 @@ export default function App() {
       </table>
     </div>
   );
+}
+
+export default function App() {
+  const path = window.location.pathname;
+  if (path.startsWith('/admin/viewer')) {
+    return <Viewer />;
+  }
+  return <AdminPanel />;
 }
