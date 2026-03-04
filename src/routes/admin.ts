@@ -228,7 +228,7 @@ router.post('/embeddings/backfill', requireAuth('admin'), async (req, res) => {
   }
 
   const batchSize = Math.max(1, Math.min(Number(req.body?.batchSize) || 50, 500));
-  const limit = Math.max(1, Math.min(Number(req.body?.limit) || 1000, 50000));
+  const limit = Math.max(1, Math.min(Number(req.body?.limit) || 1000000, 1000000));
 
   void runBackfill(batchSize, limit);
 
