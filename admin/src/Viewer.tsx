@@ -7,6 +7,7 @@ interface MessageRow {
   recipient: string | null;
   content: string | null;
   timestamp: string;
+  embedding_preview: string | null;
 }
 
 interface SourceRow {
@@ -159,7 +160,8 @@ export default function Viewer() {
                 ['sender', 'Sender'],
                 ['recipient', 'Recipient'],
                 ['content', 'Content'],
-                ['timestamp', 'Timestamp']
+                ['timestamp', 'Timestamp'],
+                ['embedding', 'Vector']
               ].map(([key, label]) => (
                 <th
                   key={key}
@@ -180,9 +182,9 @@ export default function Viewer() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6} style={{ padding: 12 }}>Loading...</td></tr>
+              <tr><td colSpan={7} style={{ padding: 12 }}>Loading...</td></tr>
             ) : messages.length === 0 ? (
-              <tr><td colSpan={6} style={{ padding: 12 }}>No messages found.</td></tr>
+              <tr><td colSpan={7} style={{ padding: 12 }}>No messages found.</td></tr>
             ) : messages.map(m => (
               <tr key={m.id}>
                 <td style={{ padding: '6px 4px', borderBottom: '1px solid #eee' }}>{m.id}</td>
@@ -197,6 +199,9 @@ export default function Viewer() {
                 </td>
                 <td style={{ padding: '6px 4px', borderBottom: '1px solid #eee' }}>
                   {m.timestamp ? new Date(m.timestamp).toLocaleString() : '—'}
+                </td>
+                <td style={{ padding: '6px 4px', borderBottom: '1px solid #eee', fontSize: 11, fontFamily: 'monospace', color: '#888', maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={m.embedding_preview || ''}>
+                  {m.embedding_preview || '—'}
                 </td>
               </tr>
             ))}
