@@ -192,6 +192,7 @@ export default function Viewer() {
             <tr>
               {[
                 ['id', 'ID'],
+                ['record_id', 'Record'],
                 ['source', 'Source'],
                 ['sender', 'Sender'],
                 ['recipient', 'Recipient'],
@@ -214,20 +215,31 @@ export default function Viewer() {
                   {label} {sortIndicator(key as SortKey)}
                 </th>
               ))}
-              <th style={{ textAlign: 'left', borderBottom: '2px solid #ccc', padding: '6px 4px', width: 40 }}></th>
+
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={{ padding: 12 }}>Loading...</td></tr>
+              <tr><td colSpan={9} style={{ padding: 12 }}>Loading...</td></tr>
             ) : messages.length === 0 ? (
-              <tr><td colSpan={8} style={{ padding: 12 }}>No messages found.</td></tr>
+              <tr><td colSpan={9} style={{ padding: 12 }}>No messages found.</td></tr>
             ) : messages.map(m => (
               <tr key={m.id} style={{
                 opacity: m.effective_to ? 0.5 : 1,
                 background: m.effective_to ? '#fafafa' : 'transparent'
               }}>
                 <td style={{ padding: '6px 4px', borderBottom: '1px solid #eee' }}>{m.id}</td>
+                <td style={{ padding: '6px 4px', borderBottom: '1px solid #eee', fontSize: 11, fontFamily: 'monospace' }}>
+                  {m.record_id ? (
+                    <span
+                      onClick={() => loadHistory(m.record_id!)}
+                      style={{ cursor: 'pointer', color: '#2196f3', textDecoration: 'underline' }}
+                      title={`View history — ${m.record_id}`}
+                    >
+                      {m.record_id.slice(0, 8)}… 📜
+                    </span>
+                  ) : '—'}
+                </td>
                 <td style={{ padding: '6px 4px', borderBottom: '1px solid #eee' }}>{m.source_name || '—'}</td>
                 <td style={{ padding: '6px 4px', borderBottom: '1px solid #eee' }}>{m.sender || '—'}</td>
                 <td style={{ padding: '6px 4px', borderBottom: '1px solid #eee' }}>{m.recipient || '—'}</td>
@@ -243,17 +255,7 @@ export default function Viewer() {
                 <td style={{ padding: '6px 4px', borderBottom: '1px solid #eee', fontSize: 11, fontFamily: 'monospace', color: '#888', maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={m.embedding_preview || ''}>
                   {m.embedding_preview || '—'}
                 </td>
-                <td style={{ padding: '6px 4px', borderBottom: '1px solid #eee' }}>
-                  {m.record_id && (
-                    <button
-                      onClick={() => loadHistory(m.record_id!)}
-                      style={{ fontSize: 11, cursor: 'pointer', background: 'none', border: '1px solid #ccc', borderRadius: 3, padding: '2px 6px' }}
-                      title="View version history"
-                    >
-                      📜
-                    </button>
-                  )}
-                </td>
+
               </tr>
             ))}
           </tbody>
