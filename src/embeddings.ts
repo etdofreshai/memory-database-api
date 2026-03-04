@@ -1,7 +1,34 @@
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
 const MODEL = 'nomic-embed-text';
 
-export async function generateEmbedding(text: string): Promise<number[]> {
+// Simple embedding queue — processes one at a time
+type QueueItem = { text: string; resolve: (v: number[]) => void; reject: (e: Error) => void };
+const queue: QueueItem[] = [];
+let processing = false;
+
+async function processQueue() {
+  if (processing) return;
+  processing = true;
+  while (queue.length > 0) {
+    const item = queue.shift()!;
+    try {
+      const result = await _generateEmbedding(item.text);
+      item.resolve(result);
+    } catch (err) {
+      item.reject(err as Error);
+    }
+  }
+  processing = false;
+}
+
+export function generateEmbedding(text: string): Promise<number[]> {
+  return new Promise((resolve, reject) => {
+    queue.push({ text, resolve, reject });
+    processQueue();
+  });
+}
+
+async function _generateEmbedding(text: string): Promise<number[]> {
   const input = (text || '').trim();
   if (!input) {
     throw new Error('Cannot generate embedding for empty text');
