@@ -6,6 +6,46 @@ import { generateEmbedding } from '../embeddings.js';
 
 const router = Router();
 
+type EmbeddingSample = {
+  id: number;
+  content_preview: string;
+  embedding_preview: number[];
+};
+
+type BackfillState = {
+  isRunning: boolean;
+  currentBatch: number;
+  totalBatches: number;
+  processed: number;
+  errorsCount: number;
+  errors: string[];
+  lastRunStartedAt: string | null;
+  lastRunFinishedAt: string | null;
+  recentSamples: EmbeddingSample[];
+  logs: string[];
+};
+
+const backfillState: BackfillState = {
+  isRunning: false,
+  currentBatch: 0,
+  totalBatches: 0,
+  processed: 0,
+  errorsCount: 0,
+  errors: [],
+  lastRunStartedAt: null,
+  lastRunFinishedAt: null,
+  recentSamples: [],
+  logs: []
+};
+
+function pushLog(message: string) {
+  const line = `[${new Date().toISOString()}] ${message}`;
+  backfillState.logs.push(line);
+  if (backfillState.logs.length > 200) {
+    backfillState.logs = backfillState.logs.slice(-200);
+  }
+}
+
 router.get('/tokens', requireAuth('admin'), async (_req, res) => {
   try {
     const result = await pool.query(
@@ -87,18 +127,37 @@ router.get('/embeddings/status', requireAuth('admin'), async (_req, res) => {
     const remaining = result.rows[0]?.remaining || 0;
     const percentage = total > 0 ? Number(((embedded / total) * 100).toFixed(2)) : 0;
 
-    res.json({ total, embedded, remaining, percentage });
+    res.json({
+      total,
+      embedded,
+      remaining,
+      percentage,
+      isRunning: backfillState.isRunning,
+      currentBatch: backfillState.currentBatch,
+      totalBatches: backfillState.totalBatches,
+      processed: backfillState.processed,
+      errorsCount: backfillState.errorsCount,
+      errors: backfillState.errors,
+      logs: backfillState.logs,
+      recentSamples: backfillState.recentSamples,
+      lastRunStartedAt: backfillState.lastRunStartedAt,
+      lastRunFinishedAt: backfillState.lastRunFinishedAt
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.post('/embeddings/backfill', requireAuth('admin'), async (req, res) => {
-  const batchSize = Math.max(1, Math.min(Number(req.body?.batchSize) || 50, 500));
-  const limit = Math.max(1, Math.min(Number(req.body?.limit) || 1000, 50000));
-
-  let processed = 0;
-  let errors = 0;
+async function runBackfill(batchSize: number, limit: number) {
+  backfillState.isRunning = true;
+  backfillState.currentBatch = 0;
+  backfillState.processed = 0;
+  backfillState.errorsCount = 0;
+  backfillState.errors = [];
+  backfillState.logs = [];
+  backfillState.recentSamples = [];
+  backfillState.lastRunStartedAt = new Date().toISOString();
+  backfillState.lastRunFinishedAt = null;
 
   try {
     const toProcess = await pool.query(
@@ -111,33 +170,72 @@ router.post('/embeddings/backfill', requireAuth('admin'), async (req, res) => {
     );
 
     const rows = toProcess.rows;
+    backfillState.totalBatches = Math.ceil(rows.length / batchSize);
+    pushLog(`Backfill started for ${rows.length} messages in ${backfillState.totalBatches} batches.`);
 
     for (let i = 0; i < rows.length; i += batchSize) {
       const batch = rows.slice(i, i + batchSize);
+      backfillState.currentBatch = Math.floor(i / batchSize) + 1;
+      let batchEmbedded = 0;
+
       for (const row of batch) {
         const content = typeof row.content === 'string' ? row.content.trim() : '';
-        if (!content) {
-          continue;
-        }
+        if (!content) continue;
 
         try {
           const embedding = await generateEmbedding(content);
           const vecStr = `[${embedding.join(',')}]`;
           await pool.query('UPDATE messages SET embedding = $1::vector WHERE id = $2', [vecStr, row.id]);
-          processed++;
-        } catch (_err) {
-          errors++;
+          backfillState.processed++;
+          batchEmbedded++;
+
+          backfillState.recentSamples.push({
+            id: row.id,
+            content_preview: content.slice(0, 120),
+            embedding_preview: embedding.slice(0, 5)
+          });
+          backfillState.recentSamples = backfillState.recentSamples.slice(-5);
+        } catch (err: any) {
+          backfillState.errorsCount++;
+          const message = `Message ${row.id}: ${err?.message || 'unknown embedding error'}`;
+          backfillState.errors.push(message);
+          backfillState.errors = backfillState.errors.slice(-20);
         }
       }
+
+      pushLog(`Batch ${backfillState.currentBatch}/${backfillState.totalBatches}: embedded ${batchEmbedded} messages.`);
     }
 
-    const remainingResult = await pool.query('SELECT COUNT(*)::int AS remaining FROM messages WHERE embedding IS NULL');
-    const remaining = remainingResult.rows[0]?.remaining || 0;
-
-    res.json({ processed, remaining, errors });
+    pushLog(`Backfill complete. Processed ${backfillState.processed}, errors ${backfillState.errorsCount}.`);
   } catch (err: any) {
-    res.status(500).json({ error: err.message, processed, errors });
+    backfillState.errorsCount++;
+    const message = `Backfill failed: ${err?.message || 'unknown error'}`;
+    backfillState.errors.push(message);
+    backfillState.errors = backfillState.errors.slice(-20);
+    pushLog(message);
+  } finally {
+    backfillState.isRunning = false;
+    backfillState.lastRunFinishedAt = new Date().toISOString();
   }
+}
+
+router.post('/embeddings/backfill', requireAuth('admin'), async (req, res) => {
+  if (backfillState.isRunning) {
+    res.status(409).json({ error: 'Backfill already running' });
+    return;
+  }
+
+  const batchSize = Math.max(1, Math.min(Number(req.body?.batchSize) || 50, 500));
+  const limit = Math.max(1, Math.min(Number(req.body?.limit) || 1000, 50000));
+
+  void runBackfill(batchSize, limit);
+
+  res.json({
+    started: true,
+    batchSize,
+    limit,
+    isRunning: true
+  });
 });
 
 export default router;
