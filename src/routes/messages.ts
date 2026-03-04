@@ -158,20 +158,20 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
     }
     const source_id = sourceResult.rows[0].id;
 
-    // Generate embedding (non-blocking — don't fail the insert if Ollama is down)
-    let embedding = null;
-    try {
-      embedding = await generateEmbedding(content);
-    } catch (err) {
-      console.warn('Failed to generate embedding:', (err as Error).message);
-    }
-
     const result = await pool.query(
-      `INSERT INTO messages (source_id, sender, recipient, content, timestamp, external_id, metadata, embedding)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [source_id, sender, recipient, content, timestamp || new Date().toISOString(), external_id, metadata ? JSON.stringify(metadata) : null, embedding ? `[${embedding.join(',')}]` : null]
+      `INSERT INTO messages (source_id, sender, recipient, content, timestamp, external_id, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [source_id, sender, recipient, content, timestamp || new Date().toISOString(), external_id, metadata ? JSON.stringify(metadata) : null]
     );
     res.status(201).json(result.rows[0]);
+
+    // Generate embedding in background (don't block the response)
+    generateEmbedding(content).then(embedding => {
+      if (embedding) {
+        pool.query('UPDATE messages SET embedding = $1 WHERE id = $2', [`[${embedding.join(',')}]`, result.rows[0].id])
+          .catch(err => console.warn('Failed to save embedding:', err.message));
+      }
+    }).catch(err => console.warn('Failed to generate embedding:', err.message));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
