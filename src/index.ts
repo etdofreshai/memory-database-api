@@ -51,6 +51,14 @@ async function bootstrap() {
   const embeddingMigrationSql = fs.readFileSync(embeddingMigrationPath, 'utf8');
   await pool.query(embeddingMigrationSql);
 
+  // Run SCD Type 2 migration
+  const scdMigrationPath = path.join(__dirname, '../migrations/003-scd-type2.sql');
+  if (fs.existsSync(scdMigrationPath)) {
+    const scdMigrationSql = fs.readFileSync(scdMigrationPath, 'utf8');
+    await pool.query(scdMigrationSql);
+    console.log('✅ SCD Type 2 migration applied');
+  }
+
   // Bootstrap admin token
   const adminTokenEnv = process.env.ADMIN_TOKEN;
   const existing = await pool.query("SELECT id, token FROM api_tokens WHERE label = 'Bootstrap Admin' AND permissions = 'admin' LIMIT 1");

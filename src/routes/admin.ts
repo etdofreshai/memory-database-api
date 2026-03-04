@@ -114,12 +114,14 @@ router.delete('/tokens/:id', requireAuth('admin'), async (req, res) => {
 
 router.get('/embeddings/status', requireAuth('admin'), async (_req, res) => {
   try {
+    // Count only current (non-superseded, active) messages for embedding stats
     const result = await pool.query(`
       SELECT
         COUNT(*)::int AS total,
         COUNT(embedding)::int AS embedded,
         (COUNT(*) - COUNT(embedding))::int AS remaining
       FROM messages
+      WHERE effective_to IS NULL AND is_active = TRUE
     `);
 
     const total = result.rows[0]?.total || 0;
@@ -163,7 +165,7 @@ async function runBackfill(batchSize: number, limit: number) {
     const toProcess = await pool.query(
       `SELECT id, content
        FROM messages
-       WHERE embedding IS NULL
+       WHERE embedding IS NULL AND effective_to IS NULL AND is_active = TRUE
        ORDER BY id ASC
        LIMIT $1`,
       [limit]

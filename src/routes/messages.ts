@@ -5,13 +5,19 @@ import { generateEmbedding } from '../embeddings.js';
 
 const router = Router();
 
+// Helper: base table or current_messages view depending on include_history param
+function baseTable(includeHistory: boolean): string {
+  return includeHistory ? 'messages' : 'current_messages';
+}
+
 // Search messages
 router.get('/search', requireAuth('read', 'write', 'admin'), async (req, res) => {
-  const { q, limit = '20', offset = '0' } = req.query;
+  const { q, limit = '20', offset = '0', include_history } = req.query;
   if (!q) { res.status(400).json({ error: 'q parameter required' }); return; }
+  const table = baseTable(include_history === 'true');
   try {
     const result = await pool.query(
-      `SELECT m.*, s.name as source_name FROM messages m
+      `SELECT m.*, s.name as source_name FROM ${table} m
        LEFT JOIN sources s ON m.source_id = s.id
        WHERE m.content ILIKE $1
        ORDER BY m.timestamp DESC LIMIT $2 OFFSET $3`,
@@ -27,6 +33,7 @@ router.get('/search', requireAuth('read', 'write', 'admin'), async (req, res) =>
 router.get('/vector-search', requireAuth('read', 'write', 'admin'), async (req, res) => {
   const q = (req.body?.q ?? req.query?.q ?? '').toString().trim();
   const limit = Number(req.body?.limit ?? req.query?.limit ?? 10);
+  const includeHistory = (req.body?.include_history ?? req.query?.include_history) === 'true';
 
   if (!q) {
     res.status(400).json({ error: 'q is required' }); return;
@@ -36,10 +43,11 @@ router.get('/vector-search', requireAuth('read', 'write', 'admin'), async (req, 
     const embedding = await generateEmbedding(q);
     const vecStr = `[${embedding.join(',')}]`;
 
+    const table = baseTable(includeHistory);
     const result = await pool.query(
       `SELECT m.*, s.name as source_name,
        m.embedding <=> $1::vector as distance
-       FROM messages m
+       FROM ${table} m
        LEFT JOIN sources s ON m.source_id = s.id
        WHERE m.embedding IS NOT NULL
        ORDER BY m.embedding <=> $1::vector
@@ -55,6 +63,34 @@ router.get('/vector-search', requireAuth('read', 'write', 'admin'), async (req, 
   }
 });
 
+// Get version history for a record
+router.get('/:record_id/history', requireAuth('read', 'write', 'admin'), async (req, res) => {
+  const { record_id } = req.params;
+
+  // Validate UUID format
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(record_id))) {
+    res.status(400).json({ error: 'Invalid record_id format (must be UUID)' });
+    return;
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT m.*, s.name as source_name FROM messages m
+       LEFT JOIN sources s ON m.source_id = s.id
+       WHERE m.record_id = $1
+       ORDER BY m.effective_from ASC`,
+      [record_id]
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'No messages found for this record_id' });
+      return;
+    }
+    res.json({ versions: result.rows, total: result.rowCount });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // List/filter messages with pagination + sorting + search
 router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
   const {
@@ -67,9 +103,11 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
     limit = '20',
     offset,
     sort = 'timestamp',
-    order = 'desc'
+    order = 'desc',
+    include_history
   } = req.query;
 
+  const table = baseTable(include_history === 'true');
   const conditions: string[] = [];
   const params: any[] = [];
   let idx = 1;
@@ -102,7 +140,7 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
 
   try {
     const countResult = await pool.query(
-      `SELECT COUNT(*)::int as total FROM messages m
+      `SELECT COUNT(*)::int as total FROM ${table} m
        LEFT JOIN sources s ON m.source_id = s.id
        ${where}`,
       params
@@ -111,10 +149,10 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
 
     const dataResult = await pool.query(
       `SELECT m.id, m.source_id, m.sender, m.recipient, m.content, m.timestamp, m.metadata,
-              m.external_id, m.created_at,
+              m.external_id, m.created_at, m.record_id, m.effective_from, m.effective_to, m.is_active,
               s.name as source_name,
               CASE WHEN m.embedding IS NOT NULL THEN LEFT(m.embedding::text, 60) ELSE NULL END as embedding_preview
-       FROM messages m
+       FROM ${table} m
        LEFT JOIN sources s ON m.source_id = s.id
        ${where}
        ORDER BY ${sortColumn} ${sortOrder}
@@ -136,7 +174,7 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
   }
 });
 
-// Create message
+// Create message (with SCD Type 2 upsert)
 router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) => {
   const { source, sender, recipient, content, timestamp, external_id, metadata } = req.body;
   if (!source || !content) {
@@ -150,22 +188,96 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
     }
   }
 
+  const client = await pool.connect();
   try {
-    // Get or verify source
-    let sourceResult = await pool.query('SELECT id FROM sources WHERE name = $1', [source]);
+    await client.query('BEGIN');
+
+    // Get or create source
+    let sourceResult = await client.query('SELECT id FROM sources WHERE name = $1', [source]);
     if (sourceResult.rows.length === 0) {
-      sourceResult = await pool.query('INSERT INTO sources (name) VALUES ($1) RETURNING id', [source]);
+      sourceResult = await client.query('INSERT INTO sources (name) VALUES ($1) RETURNING id', [source]);
     }
     const source_id = sourceResult.rows[0].id;
 
-    const result = await pool.query(
+    const ts = timestamp || new Date().toISOString();
+    const meta = metadata ? JSON.stringify(metadata) : null;
+
+    // SCD Type 2 upsert logic
+    if (external_id) {
+      // Look for an existing current version with same external_id + source_id
+      const existing = await client.query(
+        `SELECT id, record_id, content FROM messages
+         WHERE source_id = $1 AND external_id = $2 AND effective_to IS NULL
+         LIMIT 1`,
+        [source_id, external_id]
+      );
+
+      if (existing.rows.length > 0) {
+        const old = existing.rows[0];
+
+        // Content unchanged — skip, return existing row
+        if (old.content === content) {
+          await client.query('COMMIT');
+          client.release();
+
+          // Fetch full row for response
+          const fullRow = await pool.query(
+            `SELECT m.*, s.name as source_name FROM messages m
+             LEFT JOIN sources s ON m.source_id = s.id
+             WHERE m.id = $1`,
+            [old.id]
+          );
+          res.status(200).json(fullRow.rows[0]);
+          return;
+        }
+
+        // Content changed — close old version, insert new version
+        const now = new Date().toISOString();
+
+        // Close old row
+        await client.query(
+          `UPDATE messages SET effective_to = $1 WHERE id = $2`,
+          [now, old.id]
+        );
+
+        // Insert new version with same record_id
+        const result = await client.query(
+          `INSERT INTO messages (source_id, sender, recipient, content, timestamp, external_id, metadata, record_id, effective_from)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+          [source_id, sender, recipient, content, ts, external_id, meta, old.record_id, now]
+        );
+
+        await client.query('COMMIT');
+        client.release();
+
+        const newRow = result.rows[0];
+        res.status(201).json(newRow);
+
+        // Generate embedding in background
+        generateEmbedding(content).then(embedding => {
+          if (embedding) {
+            pool.query('UPDATE messages SET embedding = $1 WHERE id = $2', [`[${embedding.join(',')}]`, newRow.id])
+              .catch(err => console.warn('Failed to save embedding:', err.message));
+          }
+        }).catch(err => console.warn('Failed to generate embedding:', err.message));
+
+        return;
+      }
+    }
+
+    // No existing version found, or no external_id — insert as new record
+    const result = await client.query(
       `INSERT INTO messages (source_id, sender, recipient, content, timestamp, external_id, metadata)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [source_id, sender, recipient, content, timestamp || new Date().toISOString(), external_id, metadata ? JSON.stringify(metadata) : null]
+      [source_id, sender, recipient, content, ts, external_id, meta]
     );
+
+    await client.query('COMMIT');
+    client.release();
+
     res.status(201).json(result.rows[0]);
 
-    // Generate embedding in background (don't block the response)
+    // Generate embedding in background
     generateEmbedding(content).then(embedding => {
       if (embedding) {
         pool.query('UPDATE messages SET embedding = $1 WHERE id = $2', [`[${embedding.join(',')}]`, result.rows[0].id])
@@ -173,6 +285,28 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
       }
     }).catch(err => console.warn('Failed to generate embedding:', err.message));
   } catch (err: any) {
+    await client.query('ROLLBACK').catch(() => {});
+    client.release();
+
+    // Handle unique constraint violation for concurrent inserts with same external_id
+    if (err.code === '23505' && external_id) {
+      // Retry: another request inserted the same external_id concurrently
+      // Return the existing row
+      try {
+        const existingResult = await pool.query(
+          `SELECT m.*, s.name as source_name FROM messages m
+           LEFT JOIN sources s ON m.source_id = s.id
+           WHERE m.external_id = $1 AND m.source_id = (SELECT id FROM sources WHERE name = $2) AND m.effective_to IS NULL
+           LIMIT 1`,
+          [external_id, source]
+        );
+        if (existingResult.rows.length > 0) {
+          res.status(200).json(existingResult.rows[0]);
+          return;
+        }
+      } catch {}
+    }
+
     res.status(500).json({ error: err.message });
   }
 });
