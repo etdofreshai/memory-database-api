@@ -15,6 +15,8 @@ RUN cd admin && npm install
 COPY admin/ admin/
 RUN cd admin && npm run build
 
+COPY migrations/ migrations/
+
 FROM node:22-alpine
 WORKDIR /app
 
