@@ -18,6 +18,10 @@ function AdminPanel() {
   const [sources, setSources] = useState<Source[]>([]);
   const [editingSource, setEditingSource] = useState<number | null>(null);
   const [editSourceName, setEditSourceName] = useState('');
+  const [editingToken, setEditingToken] = useState<number | null>(null);
+  const [editTokenLabel, setEditTokenLabel] = useState('');
+  const [editTokenPerm, setEditTokenPerm] = useState('read');
+  const [editTokenSources, setEditTokenSources] = useState('');
   const [newLabel, setNewLabel] = useState('');
   const [newPerm, setNewPerm] = useState('read');
   const [newSources, setNewSources] = useState('');
@@ -53,6 +57,20 @@ function AdminPanel() {
   async function saveSource(id: number) {
     const res = await fetch(`${BASE}/api/sources/${id}`, { method: 'PATCH', headers: headers(), body: JSON.stringify({ name: editSourceName }) });
     if (res.ok) { setEditingSource(null); loadSources(); } else { setError('Failed to update source'); }
+  }
+
+  function startEditToken(t: Token) {
+    setEditingToken(t.id);
+    setEditTokenLabel(t.label);
+    setEditTokenPerm(t.permissions);
+    setEditTokenSources(t.write_sources?.join(', ') || '');
+  }
+
+  async function saveToken2(id: number) {
+    const body: any = { label: editTokenLabel, permissions: editTokenPerm };
+    body.write_sources = editTokenPerm === 'write' && editTokenSources ? editTokenSources.split(',').map(s => s.trim()) : null;
+    const res = await fetch(`${BASE}/api/admin/tokens/${id}`, { method: 'PATCH', headers: headers(), body: JSON.stringify(body) });
+    if (res.ok) { setEditingToken(null); loadTokens(); } else { setError('Failed to update token'); }
   }
 
   useEffect(() => { loadTokens(); loadSources(); }, [adminToken]);
@@ -100,41 +118,38 @@ function AdminPanel() {
         <strong>New token:</strong> <code>{createdToken}</code><br /><small>Copy now — won't be shown again</small>
       </div>}
 
-      <h2>Sources</h2>
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '2rem' }}>
-        <thead><tr>{['ID','Name',''].map(h => <th key={h} style={{ textAlign: 'left', borderBottom: '2px solid #ccc', padding: 4 }}>{h}</th>)}</tr></thead>
-        <tbody>{sources.map(s => (
-          <tr key={s.id}>
-            <td style={{ padding: 4 }}>{s.id}</td>
-            <td style={{ padding: 4 }}>
-              {editingSource === s.id
-                ? <span style={{ display: 'flex', gap: 4 }}>
-                    <input value={editSourceName} onChange={e => setEditSourceName(e.target.value)} style={{ width: 200 }} onKeyDown={e => e.key === 'Enter' && saveSource(s.id)} />
-                    <button onClick={() => saveSource(s.id)} style={{ fontSize: 12 }}>Save</button>
-                    <button onClick={() => setEditingSource(null)} style={{ fontSize: 12 }}>Cancel</button>
-                  </span>
-                : s.name}
-            </td>
-            <td style={{ padding: 4 }}>
-              {editingSource !== s.id && <button onClick={() => startEditSource(s)} style={{ fontSize: 12, cursor: 'pointer', background: 'none', border: 'none' }} title="Edit">✏️</button>}
-            </td>
-          </tr>
-        ))}</tbody>
-      </table>
-
       <h2>Tokens</h2>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead><tr>{['ID','Label','Perms','Sources','Created','Last Used','Active',''].map(h => <th key={h} style={{ textAlign: 'left', borderBottom: '2px solid #ccc', padding: 4 }}>{h}</th>)}</tr></thead>
         <tbody>{tokens.map(t => (
           <tr key={t.id} style={{ opacity: t.is_active ? 1 : 0.4 }}>
             <td style={{ padding: 4 }}>{t.id}</td>
-            <td>{t.label}</td>
-            <td>{t.permissions}</td>
-            <td>{t.write_sources?.join(', ') || '—'}</td>
-            <td>{new Date(t.created_at).toLocaleDateString()}</td>
-            <td>{t.last_used_at ? new Date(t.last_used_at).toLocaleDateString() : '—'}</td>
-            <td>{t.is_active ? '✅' : '❌'}</td>
-            <td>{t.is_active && <button onClick={() => deactivate(t.id)} style={{ fontSize: 12 }}>Deactivate</button>}</td>
+            <td style={{ padding: 4 }}>{editingToken === t.id
+              ? <input value={editTokenLabel} onChange={e => setEditTokenLabel(e.target.value)} style={{ width: 140 }} />
+              : t.label}</td>
+            <td style={{ padding: 4 }}>{editingToken === t.id
+              ? <select value={editTokenPerm} onChange={e => setEditTokenPerm(e.target.value)}>
+                  <option value="read">read</option><option value="write">write</option><option value="admin">admin</option>
+                </select>
+              : t.permissions}</td>
+            <td style={{ padding: 4 }}>{editingToken === t.id
+              ? <input placeholder="Sources (comma-sep)" value={editTokenSources} onChange={e => setEditTokenSources(e.target.value)} style={{ width: 140 }} />
+              : (t.write_sources?.join(', ') || '—')}</td>
+            <td style={{ padding: 4 }}>{new Date(t.created_at).toLocaleDateString()}</td>
+            <td style={{ padding: 4 }}>{t.last_used_at ? new Date(t.last_used_at).toLocaleDateString() : '—'}</td>
+            <td style={{ padding: 4 }}>{t.is_active ? '✅' : '❌'}</td>
+            <td style={{ padding: 4 }}>
+              {editingToken === t.id
+                ? <span style={{ display: 'flex', gap: 4 }}>
+                    <button onClick={() => saveToken2(t.id)} style={{ fontSize: 12 }}>Save</button>
+                    <button onClick={() => setEditingToken(null)} style={{ fontSize: 12 }}>Cancel</button>
+                  </span>
+                : <>
+                    {t.is_active && <button onClick={() => startEditToken(t)} style={{ fontSize: 12, cursor: 'pointer', background: 'none', border: 'none' }} title="Edit">✏️</button>}
+                    {t.is_active && <button onClick={() => deactivate(t.id)} style={{ fontSize: 12 }}>Deactivate</button>}
+                  </>
+              }
+            </td>
           </tr>
         ))}</tbody>
       </table>
