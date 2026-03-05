@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import crypto from 'crypto';
+import { promisify } from 'util';
+import { execFile } from 'child_process';
 import pool from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { generateEmbedding } from '../embeddings.js';
@@ -37,6 +39,8 @@ const backfillState: BackfillState = {
   recentSamples: [],
   logs: []
 };
+
+const execFileAsync = promisify(execFile);
 
 function pushLog(message: string) {
   const line = `[${new Date().toISOString()}] ${message}`;
@@ -144,6 +148,130 @@ router.get('/embeddings/status', requireAuth('admin'), async (_req, res) => {
       recentSamples: backfillState.recentSamples,
       lastRunStartedAt: backfillState.lastRunStartedAt,
       lastRunFinishedAt: backfillState.lastRunFinishedAt
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+type DockerContainerStats = {
+  id: string;
+  name: string;
+  size: string;
+};
+
+async function getDockerContainerStats(): Promise<{ ok: boolean; data?: DockerContainerStats; error?: string }> {
+  const hostname = process.env.HOSTNAME || '';
+
+  try {
+    const { stdout } = await execFileAsync('docker', [
+      'ps',
+      '-a',
+      '--size',
+      '--format',
+      '{{json .}}'
+    ]);
+
+    const lines = stdout.split('\n').map(line => line.trim()).filter(Boolean);
+    const containers = lines
+      .map(line => {
+        try {
+          return JSON.parse(line) as { ID?: string; Names?: string; Size?: string };
+        } catch {
+          return null;
+        }
+      })
+      .filter((row): row is { ID?: string; Names?: string; Size?: string } => row !== null);
+
+    const match = containers.find(row => hostname && row.ID?.startsWith(hostname))
+      || containers.find(row => row.Names?.includes('memory-database-api'))
+      || null;
+
+    if (!match) {
+      return { ok: false, error: 'Container not found in docker ps output' };
+    }
+
+    return {
+      ok: true,
+      data: {
+        id: match.ID || '',
+        name: match.Names || '',
+        size: match.Size || ''
+      }
+    };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Unable to query docker container stats' };
+  }
+}
+
+router.get('/stats', requireAuth('admin'), async (_req, res) => {
+  try {
+    const [dbSizeResult, dbTablesResult, dbCountsResult, dbVersionResult, dbNowResult, containerStats] = await Promise.all([
+      pool.query(`
+        SELECT
+          current_database() AS database,
+          pg_database_size(current_database())::bigint AS size_bytes,
+          pg_size_pretty(pg_database_size(current_database())) AS size_pretty
+      `),
+      pool.query(`
+        SELECT
+          schemaname,
+          relname AS table_name,
+          pg_total_relation_size(relid)::bigint AS total_bytes,
+          pg_size_pretty(pg_total_relation_size(relid)) AS total_pretty,
+          pg_relation_size(relid)::bigint AS table_bytes,
+          pg_size_pretty(pg_relation_size(relid)) AS table_pretty,
+          (pg_total_relation_size(relid) - pg_relation_size(relid))::bigint AS index_bytes,
+          pg_size_pretty(pg_total_relation_size(relid) - pg_relation_size(relid)) AS index_pretty
+        FROM pg_catalog.pg_statio_user_tables
+        ORDER BY pg_total_relation_size(relid) DESC
+        LIMIT 25
+      `),
+      pool.query(`
+        SELECT
+          (SELECT COUNT(*)::bigint FROM messages WHERE effective_to IS NULL AND is_active = TRUE) AS messages_current,
+          (SELECT COUNT(*)::bigint FROM people) AS people,
+          (SELECT COUNT(*)::bigint FROM sources) AS sources
+      `),
+      pool.query('SELECT version() AS version'),
+      pool.query('SELECT NOW() AS now_utc'),
+      getDockerContainerStats()
+    ]);
+
+    res.json({
+      timestamp: dbNowResult.rows[0]?.now_utc ?? new Date().toISOString(),
+      database: {
+        name: dbSizeResult.rows[0]?.database,
+        size_bytes: Number(dbSizeResult.rows[0]?.size_bytes || 0),
+        size_pretty: dbSizeResult.rows[0]?.size_pretty,
+        version: dbVersionResult.rows[0]?.version,
+        counts: {
+          messages_current: Number(dbCountsResult.rows[0]?.messages_current || 0),
+          people: Number(dbCountsResult.rows[0]?.people || 0),
+          sources: Number(dbCountsResult.rows[0]?.sources || 0)
+        },
+        top_tables: dbTablesResult.rows.map((row: any) => ({
+          schema: row.schemaname,
+          table: row.table_name,
+          total_bytes: Number(row.total_bytes || 0),
+          total_pretty: row.total_pretty,
+          table_bytes: Number(row.table_bytes || 0),
+          table_pretty: row.table_pretty,
+          index_bytes: Number(row.index_bytes || 0),
+          index_pretty: row.index_pretty
+        }))
+      },
+      container: containerStats.ok
+        ? {
+          available: true,
+          id: containerStats.data?.id,
+          name: containerStats.data?.name,
+          size: containerStats.data?.size
+        }
+        : {
+          available: false,
+          error: containerStats.error
+        }
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
