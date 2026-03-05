@@ -9,6 +9,7 @@ import healthRouter from './routes/health.js';
 import messagesRouter from './routes/messages.js';
 import sourcesRouter from './routes/sources.js';
 import peopleRouter from './routes/people.js';
+import statsRouter from './routes/stats.js';
 import adminRouter from './routes/admin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,6 +24,7 @@ app.use('/api/health', healthRouter);
 app.use('/api/messages', messagesRouter);
 app.use('/api/sources', sourcesRouter);
 app.use('/api/people', peopleRouter);
+app.use('/api/stats', statsRouter);
 app.use('/api/admin', adminRouter);
 
 // Serve admin frontend in production
