@@ -182,9 +182,9 @@ export default function Viewer() {
         </label>
       </div>
 
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      {error && <p style={{ color: '#ff6b6b' }}>{error}</p>}
 
-      <p style={{ color: '#555' }}>Total messages: {total.toLocaleString()}{includeHistory ? ' (including old versions)' : ''}</p>
+      <p style={{ color: '#aaa' }}>Total messages: {total.toLocaleString()}{includeHistory ? ' (including old versions)' : ''}</p>
 
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
@@ -280,7 +280,7 @@ export default function Viewer() {
         >
           <div
             style={{
-              background: 'white', borderRadius: 8, padding: 24, maxWidth: 900,
+              background: '#1a1a2e', borderRadius: 8, padding: 24, maxWidth: 900,
               width: '90%', maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
             }}
             onClick={e => e.stopPropagation()}
@@ -294,7 +294,7 @@ export default function Viewer() {
                 ✕
               </button>
             </div>
-            <p style={{ color: '#666', fontSize: 12, fontFamily: 'monospace', margin: '0 0 16px' }}>
+            <p style={{ color: '#777', fontSize: 12, fontFamily: 'monospace', margin: '0 0 16px' }}>
               record_id: {historyRecordId}
             </p>
 
@@ -304,12 +304,12 @@ export default function Viewer() {
               <p>No versions found.</p>
             ) : (
               <div>
-                <p style={{ color: '#555', marginBottom: 8 }}>{historyVersions.length} version{historyVersions.length !== 1 ? 's' : ''}</p>
+                <p style={{ color: '#aaa', marginBottom: 8 }}>{historyVersions.length} version{historyVersions.length !== 1 ? 's' : ''}</p>
                 {historyVersions.map((v, idx) => (
                   <div
                     key={v.id}
                     style={{
-                      border: '1px solid #ddd',
+                      border: '1px solid #333',
                       borderRadius: 6,
                       padding: 12,
                       marginBottom: 8,
@@ -321,11 +321,11 @@ export default function Viewer() {
                       <strong>
                         Version {idx + 1}
                         {!v.effective_to && <span style={{ color: '#2196f3', marginLeft: 8 }}>● Current</span>}
-                        {v.effective_to && <span style={{ color: '#999', marginLeft: 8 }}>Superseded</span>}
+                        {v.effective_to && <span style={{ color: '#777', marginLeft: 8 }}>Superseded</span>}
                       </strong>
-                      <span style={{ fontSize: 11, color: '#999' }}>id: {v.id}</span>
+                      <span style={{ fontSize: 11, color: '#777' }}>id: {v.id}</span>
                     </div>
-                    <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, color: '#777', marginBottom: 8 }}>
                       <span>From: {v.effective_from ? new Date(v.effective_from).toLocaleString() : '—'}</span>
                       {v.effective_to && <span style={{ marginLeft: 12 }}>To: {new Date(v.effective_to).toLocaleString()}</span>}
                     </div>
@@ -333,7 +333,7 @@ export default function Viewer() {
                       <strong>Sender:</strong> {v.sender || '—'} → <strong>Recipient:</strong> {v.recipient || '—'}
                     </div>
                     <div style={{
-                      marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4,
+                      marginTop: 8, padding: 8, background: '#16213e', borderRadius: 4,
                       fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 200, overflowY: 'auto'
                     }}>
                       {v.content || '(empty)'}

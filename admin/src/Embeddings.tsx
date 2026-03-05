@@ -120,7 +120,7 @@ export default function Embeddings() {
         <button onClick={loadStatus}>Refresh</button>
       </div>
 
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      {error && <p style={{ color: '#ff6b6b' }}>{error}</p>}
 
       <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 14, marginBottom: 16 }}>
         <h2 style={{ marginTop: 0 }}>Status</h2>
@@ -172,7 +172,7 @@ export default function Embeddings() {
       <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 14 }}>
         <h2 style={{ marginTop: 0 }}>Recent Embedding Samples</h2>
         {!status?.recentSamples?.length ? (
-          <p style={{ color: '#666' }}>No new samples yet.</p>
+          <p style={{ color: '#999' }}>No new samples yet.</p>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>

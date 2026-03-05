@@ -105,7 +105,7 @@ function AdminPanel() {
         <input placeholder="Admin token" type="password" value={adminToken} onChange={e => setAdminToken(e.target.value)} style={{ width: 400, marginRight: 8 }} />
         <button onClick={saveToken}>Connect</button>
       </div>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      {error && <p style={{ color: '#ff6b6b' }}>{error}</p>}
 
       <h2>Create Token</h2>
       <div style={{ display: 'flex', gap: 8, marginBottom: '1rem', flexWrap: 'wrap' }}>
@@ -116,7 +116,7 @@ function AdminPanel() {
         {newPerm === 'write' && <input placeholder="Sources (comma-sep)" value={newSources} onChange={e => setNewSources(e.target.value)} />}
         <button onClick={createToken} disabled={!newLabel}>Create</button>
       </div>
-      {createdToken && <div style={{ background: '#e8f5e9', padding: 12, borderRadius: 4, marginBottom: 16, wordBreak: 'break-all' }}>
+      {createdToken && <div style={{ background: '#1b3a2a', padding: 12, borderRadius: 4, marginBottom: 16, wordBreak: 'break-all' }}>
         <strong>New token:</strong> <code>{createdToken}</code><br /><small>Copy now — won't be shown again</small>
       </div>}
 
