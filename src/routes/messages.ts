@@ -151,7 +151,11 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
       `SELECT m.id, m.source_id, m.sender, m.recipient, m.content, m.timestamp, m.metadata,
               m.external_id, m.created_at, m.record_id, m.effective_from, m.effective_to, m.is_active,
               s.name as source_name,
-              CASE WHEN m.embedding IS NOT NULL THEN LEFT(m.embedding::text, 60) ELSE NULL END as embedding_preview
+              CASE WHEN m.embedding IS NOT NULL THEN LEFT(m.embedding::text, 60) ELSE NULL END as embedding_preview,
+              CASE
+                WHEN m.record_id IS NULL THEN 0
+                ELSE (SELECT COUNT(*)::int FROM messages mv WHERE mv.record_id = m.record_id)
+              END as version_count
        FROM ${table} m
        LEFT JOIN sources s ON m.source_id = s.id
        ${where}

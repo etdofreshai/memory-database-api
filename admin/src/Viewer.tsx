@@ -12,6 +12,7 @@ interface MessageRow {
   effective_from: string | null;
   effective_to: string | null;
   is_active: boolean;
+  version_count?: number;
 }
 
 interface SourceRow {
@@ -236,7 +237,7 @@ export default function Viewer() {
                       style={{ cursor: 'pointer', color: '#2196f3', textDecoration: 'underline' }}
                       title={`View history — ${m.record_id}`}
                     >
-                      {m.record_id.slice(0, 8)}… 📜
+                      {m.record_id.slice(0, 8)}… 📜 ({Math.max(1, Number(m.version_count || 1))})
                     </span>
                   ) : '—'}
                 </td>
