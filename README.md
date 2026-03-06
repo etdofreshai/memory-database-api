@@ -53,9 +53,9 @@ curl -X POST http://localhost:3000/api/messages/ingest \
   -F 'files=@photo.jpg'
 ```
 
-Files are SHA-256 deduplicated and stored at `/memory/content/<record_id>.<ext>`.
+Files are SHA-256 deduplicated and stored at `/memory/attachments/<record_id>.<ext>`.
 
-**Env vars:** `ATTACHMENT_STORAGE_PATH` (default `/memory/content`), `INGEST_MAX_FILE_SIZE` (default 1GB).
+**Env vars:** `ATTACHMENT_STORAGE_PATH` (default `/memory/attachments`), `INGEST_MAX_FILE_SIZE` (default 1GB).
 
 ## Admin Viewer
 

@@ -9,7 +9,7 @@ import { generateEmbedding } from '../embeddings.js';
 
 const router = Router();
 
-const STORAGE_PATH = process.env.ATTACHMENT_STORAGE_PATH || '/memory/content';
+const STORAGE_PATH = process.env.ATTACHMENT_STORAGE_PATH || '/memory/attachments';
 const MAX_FILE_SIZE = parseInt(process.env.INGEST_MAX_FILE_SIZE || String(1024 * 1024 * 1024)); // 1GB
 const MAX_FILES = 10;
 

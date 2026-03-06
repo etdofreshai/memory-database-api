@@ -175,7 +175,7 @@ No fuzzy/perceptual dedupe in V1.
 1. Receive message + attachment bytes
 2. Compute SHA-256
 3. Lookup/create attachment in `attachments`
-4. If new attachment only, write file to `/memory/content/<attachment_record_id>.<ext>`
+4. If new attachment only, write file to `/memory/attachments/<attachment_record_id>.<ext>`
 5. Create message row (existing message flow)
 6. Create one `message_attachment_links` row per linked attachment
 
