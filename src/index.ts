@@ -16,6 +16,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000');
 
+function ensureMemoryMountHelloFile() {
+  const memoryDir = process.env.MEMORY_DIR || '/memory';
+  const helloPath = path.join(memoryDir, 'hello.txt');
+
+  fs.mkdirSync(memoryDir, { recursive: true });
+
+  if (fs.existsSync(helloPath)) {
+    console.log(`📁 Memory mount check: exists ${helloPath}`);
+    return;
+  }
+
+  fs.writeFileSync(helloPath, 'hello from memory-database-api\n', 'utf8');
+  console.log(`✅ Memory mount check: created ${helloPath}`);
+}
+
 app.use(cors());
 app.use(express.json());
 
@@ -34,6 +49,8 @@ app.get('/admin/*', (_req, res) => {
 });
 
 async function bootstrap() {
+  ensureMemoryMountHelloFile();
+
   // Create api_tokens table
   await pool.query(`
     CREATE TABLE IF NOT EXISTS api_tokens (
