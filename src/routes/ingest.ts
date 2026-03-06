@@ -198,10 +198,13 @@ router.post('/', requireAuth('write', 'admin'), upload.array('files', MAX_FILES)
         writtenFiles.push(storagePath);
       }
 
-      // Create link
+      // Create link (idempotent — skip if already exists for this msg+attachment pair)
       const linkResult = await client.query(
         `INSERT INTO message_attachment_links (message_record_id, attachment_record_id, ordinal, role, provider, provider_message_id, provider_attachment_id, metadata)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (message_record_id, attachment_record_id) WHERE effective_to IS NULL AND is_active = TRUE
+         DO UPDATE SET updated_at = NOW()
+         RETURNING id`,
         [
           messageRecordId,
           attachmentRecordId,

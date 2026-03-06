@@ -146,6 +146,50 @@ describe('POST /api/messages/ingest', () => {
     }
   });
 
+  it('rerunning ingest does not duplicate links (idempotent)', async () => {
+    const extId = 'idem-test-' + Date.now();
+    const fileContent = Buffer.from('idempotent-file-' + Date.now());
+    const msg = { source: 'test', sender: 'tester', content: 'idempotent msg', timestamp: new Date().toISOString(), external_id: extId };
+    const meta = [{ original_file_name: 'idem.txt', role: 'original', provider: 'imessage', provider_attachment_id: 'att-123' }];
+
+    // First ingest
+    const res1 = await request(app)
+      .post('/api/messages/ingest')
+      .set('Authorization', `Bearer ${token}`)
+      .field('message', JSON.stringify(msg))
+      .field('attachments_meta', JSON.stringify(meta))
+      .attach('files', fileContent, 'idem.txt');
+
+    expect(res1.status).toBe(201);
+    const msgRecordId = res1.body.message.record_id;
+    const linkId1 = res1.body.attachments[0].link_id;
+
+    // Second ingest — same message + same file = should not create duplicate link
+    const res2 = await request(app)
+      .post('/api/messages/ingest')
+      .set('Authorization', `Bearer ${token}`)
+      .field('message', JSON.stringify(msg))
+      .field('attachments_meta', JSON.stringify(meta))
+      .attach('files', fileContent, 'idem.txt');
+
+    expect(res2.status).toBe(201);
+    expect(res2.body.message.record_id).toBe(msgRecordId);
+    // Attachment should be deduplicated
+    expect(res2.body.attachments[0].deduplicated).toBe(true);
+    // Link should be same (upserted, not duplicated)
+    expect(res2.body.attachments[0].link_id).toBe(linkId1);
+
+    // Verify only 1 link exists in DB
+    const linkCount = await pool.query(
+      `SELECT COUNT(*)::int as cnt FROM current_message_attachment_links WHERE message_record_id = $1`,
+      [msgRecordId]
+    );
+    expect(linkCount.rows[0].cnt).toBe(1);
+
+    // Cleanup
+    try { fs.unlinkSync(res1.body.attachments[0].storage_path); } catch {}
+  });
+
   it('returns 401 without auth', async () => {
     const res = await request(app)
       .post('/api/messages/ingest')
