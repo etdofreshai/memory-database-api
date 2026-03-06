@@ -7,6 +7,8 @@ import peopleRouter from './routes/people.js';
 import statsRouter from './routes/stats.js';
 import adminRouter from './routes/admin.js';
 import ingestRouter from './routes/ingest.js';
+import attachmentsRouter from './routes/attachments.js';
+import linksRouter from './routes/links.js';
 
 const app = express();
 
@@ -21,6 +23,8 @@ app.use('/api/sources', sourcesRouter);
 app.use('/api/people', peopleRouter);
 app.use('/api/stats', statsRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/attachments', attachmentsRouter);
+app.use('/api/links', linksRouter);
 
 export { app };
 export default app;

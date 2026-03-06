@@ -28,7 +28,12 @@ DATABASE_URL=postgresql://... npm start
 - `GET /api/sources` — List sources
 - `GET /api/people` — List people
 - `GET/POST/PATCH/DELETE /api/admin/tokens` — Token management (admin)
+- `GET /api/messages/:record_id/attachments` — Linked attachments for a message
+- `GET /api/attachments?q=&mime_type=&file_type=&privacy_level=&sha256=&record_id=&page=&limit=` — List/filter attachments
+- `GET /api/attachments/:record_id` — Single attachment + linked messages
+- `GET /api/links?message_record_id=&attachment_record_id=&provider=&role=&q=&page=&limit=` — List/filter message-attachment links
 - `/admin` — Admin dashboard
+- `/admin/viewer` — Data viewer (messages, attachments, links)
 
 ## Ingest Endpoint (Attachments V1)
 
@@ -51,6 +56,16 @@ curl -X POST http://localhost:3000/api/messages/ingest \
 Files are SHA-256 deduplicated and stored at `/memory/content/<record_id>.<ext>`.
 
 **Env vars:** `ATTACHMENT_STORAGE_PATH` (default `/memory/content`), `INGEST_MAX_FILE_SIZE` (default 1GB).
+
+## Admin Viewer
+
+The `/admin/viewer` page provides a tabbed interface for inspecting all three core tables:
+
+- **Messages** — searchable list with filters for source, sender/recipient, date range, and has-attachments. Click a row to see full details and linked attachments.
+- **Attachments** — searchable by filename/summary/OCR, filterable by MIME type, file type, privacy level, SHA256 hash, and record ID. Click to see linked messages.
+- **Links** — browse message↔attachment links, filter by message/attachment record ID and provider. Click for full detail with cross-references.
+
+All tabs support pagination and click-to-detail modals with raw JSON inspection.
 
 ## Migrations
 

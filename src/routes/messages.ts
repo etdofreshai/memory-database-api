@@ -63,6 +63,26 @@ router.get('/vector-search', requireAuth('read', 'write', 'admin'), async (req, 
   }
 });
 
+// Get linked attachments for a message by record_id
+router.get('/:record_id/attachments', requireAuth('read', 'write', 'admin'), async (req, res) => {
+  const { record_id } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT l.*, a.original_file_name, a.mime_type, a.file_type, a.size_bytes,
+              a.privacy_level, a.summary_text, a.sha256, a.storage_provider,
+              a.url_local, a.imported_at
+       FROM current_message_attachment_links l
+       LEFT JOIN current_attachments a ON a.record_id = l.attachment_record_id
+       WHERE l.message_record_id = $1::uuid
+       ORDER BY l.ordinal ASC NULLS LAST, l.created_at ASC`,
+      [record_id]
+    );
+    res.json({ attachments: result.rows, total: result.rowCount });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get version history for a record
 router.get('/:record_id/history', requireAuth('read', 'write', 'admin'), async (req, res) => {
   const { record_id } = req.params;
