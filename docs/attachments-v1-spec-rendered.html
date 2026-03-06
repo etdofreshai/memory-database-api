@@ -1,0 +1,238 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Attachments V1 Spec</title><style>body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:980px;margin:40px auto;padding:0 16px;line-height:1.5}pre{background:#0b1020;color:#e6edf3;padding:12px;border-radius:8px;overflow:auto}code{background:#f3f4f6;padding:2px 4px;border-radius:4px}</style></head><body><h1>Attachments V1 Spec (Draft — Revised)</h1>
+<p>Status: Draft for review (no implementation yet)<br>Owner: ET + OpenClaw<br>Scope: <code>memory-database-api</code></p>
+<h2>1) Goal</h2>
+<p>Support attachments with:</p>
+<ul>
+<li>Strong dedupe via content identity (<code>sha256</code>)</li>
+<li>Clean message↔content linkage through attachments</li>
+<li>Compatibility with SCD Type 2 (<code>record_id</code> pattern)</li>
+<li>Privacy-aware content policy</li>
+</ul>
+<h2>2) Core V1 Model (Simplified)</h2>
+<p>Use <strong>two main tables</strong>:</p>
+<ol>
+<li><code>content_objects</code> — canonical file/content identity and metadata</li>
+<li><code>attachments</code> — link table between message and content (+ optional link metadata)</li>
+</ol>
+<p>This keeps V1 lean while preserving a clean path to future normalization.</p>
+<hr>
+<h2>3) Table: <code>content_objects</code></h2>
+<p>Purpose: one logical content item per file identity (dedupe anchor).</p>
+<h3>Required identity fields</h3>
+<ul>
+<li><code>id BIGSERIAL PRIMARY KEY</code> (physical row)</li>
+<li><code>record_id UUID NOT NULL DEFAULT gen_random_uuid()</code> (logical identity)</li>
+<li><code>sha256 TEXT NOT NULL</code></li>
+</ul>
+<h3>Metadata fields</h3>
+<ul>
+<li><code>size_bytes BIGINT</code></li>
+<li><code>mime_type TEXT</code></li>
+<li><code>file_type TEXT</code> (image|video|audio|document|file)</li>
+<li><code>original_file_name TEXT</code></li>
+<li><code>created_at_source TIMESTAMPTZ</code></li>
+</ul>
+<h3>Storage resolution fields</h3>
+<ul>
+<li><code>storage_provider TEXT NOT NULL DEFAULT &#39;local&#39;</code></li>
+<li><code>storage_path TEXT</code> (local canonical path)</li>
+<li><code>url_local TEXT</code></li>
+<li><code>url_fallback_1 TEXT</code></li>
+<li><code>url_fallback_2 TEXT</code></li>
+<li><code>url_fallback_3 TEXT</code></li>
+</ul>
+<h3>Privacy field</h3>
+<ul>
+<li><code>privacy_level TEXT NOT NULL DEFAULT &#39;private_consent&#39;</code><ul>
+<li>Allowed values (V1):<ul>
+<li><code>public</code></li>
+<li><code>private_consent</code></li>
+<li><code>private_double_consent</code></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<h3>AI/enrichment fields</h3>
+<ul>
+<li><code>summary_text TEXT</code></li>
+<li><code>summary_model TEXT</code></li>
+<li><code>summary_updated_at TIMESTAMPTZ</code></li>
+<li><code>labels JSONB DEFAULT &#39;[]&#39;::jsonb</code></li>
+<li><code>faces JSONB DEFAULT &#39;[]&#39;::jsonb</code></li>
+<li><code>ocr_text TEXT</code></li>
+<li><code>metadata JSONB DEFAULT &#39;{}&#39;::jsonb</code></li>
+</ul>
+<h3>SCD Type 2 fields</h3>
+<ul>
+<li><code>effective_from TIMESTAMPTZ NOT NULL DEFAULT NOW()</code></li>
+<li><code>effective_to TIMESTAMPTZ</code></li>
+<li><code>is_active BOOLEAN NOT NULL DEFAULT TRUE</code></li>
+</ul>
+<h3>Optional variant support (V1 lightweight)</h3>
+<ul>
+<li><code>variant_content_ids JSONB DEFAULT &#39;[]&#39;::jsonb</code><ul>
+<li>Holds related variant <code>record_id</code>s (thumbnail/compressed/etc.)</li>
+<li>V2 can replace with normalized <code>content_variants</code> table if needed</li>
+</ul>
+</li>
+</ul>
+<hr>
+<h2>4) Table: <code>attachments</code></h2>
+<p>Purpose: message↔content relationship.</p>
+<h3>Minimal fields</h3>
+<ul>
+<li><code>id BIGSERIAL PRIMARY KEY</code></li>
+<li><code>record_id UUID NOT NULL DEFAULT gen_random_uuid()</code></li>
+<li><code>message_record_id UUID NOT NULL</code></li>
+<li><code>content_record_id UUID NOT NULL</code></li>
+</ul>
+<h3>Optional link metadata</h3>
+<ul>
+<li><code>ordinal INTEGER</code> (display order in message)</li>
+<li><code>role TEXT</code> (original|thumbnail|preview|transcript|other)</li>
+<li><code>provider_attachment_id TEXT</code> (optional provider-native ID)</li>
+<li><code>provider_message_id TEXT</code> (optional provider-native message ID)</li>
+<li><code>metadata JSONB DEFAULT &#39;{}&#39;::jsonb</code></li>
+</ul>
+<h3>SCD Type 2 fields</h3>
+<ul>
+<li><code>effective_from TIMESTAMPTZ NOT NULL DEFAULT NOW()</code></li>
+<li><code>effective_to TIMESTAMPTZ</code></li>
+<li><code>is_active BOOLEAN NOT NULL DEFAULT TRUE</code></li>
+</ul>
+<h3>Important note on keys</h3>
+<ul>
+<li>We keep <code>id</code> for physical row internals.</li>
+<li>We link logically using <code>*_record_id</code> for stability across versions.</li>
+</ul>
+<hr>
+<h2>5) SQL Sketch</h2>
+<pre><code class="language-sql">CREATE TABLE IF NOT EXISTS content_objects (
+  id BIGSERIAL PRIMARY KEY,
+  record_id UUID NOT NULL DEFAULT gen_random_uuid(),
+
+  sha256 TEXT NOT NULL,
+  size_bytes BIGINT,
+  mime_type TEXT,
+  file_type TEXT,
+  original_file_name TEXT,
+  created_at_source TIMESTAMPTZ,
+
+  storage_provider TEXT NOT NULL DEFAULT &#39;local&#39;,
+  storage_path TEXT,
+  url_local TEXT,
+  url_fallback_1 TEXT,
+  url_fallback_2 TEXT,
+  url_fallback_3 TEXT,
+
+  privacy_level TEXT NOT NULL DEFAULT &#39;private_consent&#39;
+    CHECK (privacy_level IN (&#39;public&#39;, &#39;private_consent&#39;, &#39;private_double_consent&#39;)),
+
+  summary_text TEXT,
+  summary_model TEXT,
+  summary_updated_at TIMESTAMPTZ,
+  labels JSONB NOT NULL DEFAULT &#39;[]&#39;::jsonb,
+  faces JSONB NOT NULL DEFAULT &#39;[]&#39;::jsonb,
+  ocr_text TEXT,
+  metadata JSONB NOT NULL DEFAULT &#39;{}&#39;::jsonb,
+
+  variant_content_ids JSONB NOT NULL DEFAULT &#39;[]&#39;::jsonb,
+
+  effective_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  effective_to TIMESTAMPTZ,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  UNIQUE(record_id, effective_from)
+);
+
+CREATE TABLE IF NOT EXISTS attachments (
+  id BIGSERIAL PRIMARY KEY,
+  record_id UUID NOT NULL DEFAULT gen_random_uuid(),
+
+  message_record_id UUID NOT NULL,
+  content_record_id UUID NOT NULL,
+
+  ordinal INTEGER,
+  role TEXT,
+  provider_attachment_id TEXT,
+  provider_message_id TEXT,
+  metadata JSONB NOT NULL DEFAULT &#39;{}&#39;::jsonb,
+
+  effective_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  effective_to TIMESTAMPTZ,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  UNIQUE(record_id, effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_current
+  ON content_objects(record_id)
+  WHERE effective_to IS NULL AND is_active = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_content_sha256 ON content_objects(sha256);
+CREATE INDEX IF NOT EXISTS idx_content_privacy ON content_objects(privacy_level);
+CREATE INDEX IF NOT EXISTS idx_content_metadata_gin ON content_objects USING GIN (metadata);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_message_record_id ON attachments(message_record_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_content_record_id ON attachments(content_record_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_provider_att_id ON attachments(provider_attachment_id);
+</code></pre>
+<hr>
+<h2>6) Current Views</h2>
+<pre><code class="language-sql">CREATE OR REPLACE VIEW current_content_objects AS
+SELECT *
+FROM content_objects
+WHERE effective_to IS NULL AND is_active = TRUE;
+
+CREATE OR REPLACE VIEW current_attachments AS
+SELECT *
+FROM attachments
+WHERE effective_to IS NULL AND is_active = TRUE;
+</code></pre>
+<hr>
+<h2>7) Dedupe Rules (V1)</h2>
+<ul>
+<li>Primary dedupe signal: <code>sha256</code></li>
+<li>If incoming file hash matches an existing current content object:<ul>
+<li>Reuse existing <code>content_record_id</code></li>
+<li>Create new <code>attachments</code> link row for the message</li>
+</ul>
+</li>
+<li>No hard unique on <code>sha256</code> at physical row level due to SCD versions</li>
+</ul>
+<hr>
+<h2>8) Retrieval Rule (V1)</h2>
+<p>When loading content bytes:</p>
+<ol>
+<li>Try <code>url_local</code> / <code>storage_path</code> first</li>
+<li>If unavailable, try <code>url_fallback_1</code></li>
+<li>Then <code>url_fallback_2</code></li>
+<li>Then <code>url_fallback_3</code></li>
+</ol>
+<hr>
+<h2>9) API Surface (Draft)</h2>
+<ul>
+<li><code>POST /api/content</code> (or <code>/api/content-objects</code>) — create/reuse content identity</li>
+<li><code>POST /api/attachments</code> — create message↔content link</li>
+<li><code>GET /api/messages/:messageRecordId/attachments</code></li>
+<li><code>PATCH /api/content/:recordId/summary</code> — enrichment updates</li>
+</ul>
+<p>No implementation yet — schema and semantics only.</p>
+<hr>
+<h2>10) Remaining Design Point (for next review)</h2>
+<p>Main open point ET called out:<br><strong>exact shape of <code>attachments</code> link metadata</strong> (what is truly required vs optional in V1).</p>
+<p>Everything else is now aligned around:</p>
+<ul>
+<li>logical <code>record_id</code> references</li>
+<li>content dedupe by hash</li>
+<li>link-table attachments</li>
+<li>explicit privacy levels</li>
+</ul>
+</body></html>

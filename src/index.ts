@@ -1,31 +1,13 @@
 import express from 'express';
-import cors from 'cors';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pool from './db.js';
-import healthRouter from './routes/health.js';
-import messagesRouter from './routes/messages.js';
-import sourcesRouter from './routes/sources.js';
-import peopleRouter from './routes/people.js';
-import statsRouter from './routes/stats.js';
-import adminRouter from './routes/admin.js';
+import { app } from './app.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const app = express();
 const PORT = parseInt(process.env.PORT || '3000');
-
-app.use(cors());
-app.use(express.json());
-
-// API routes
-app.use('/api/health', healthRouter);
-app.use('/api/messages', messagesRouter);
-app.use('/api/sources', sourcesRouter);
-app.use('/api/people', peopleRouter);
-app.use('/api/stats', statsRouter);
-app.use('/api/admin', adminRouter);
 
 // Serve admin frontend in production
 app.use('/admin', express.static(path.join(__dirname, '../admin/dist')));
@@ -59,6 +41,14 @@ async function bootstrap() {
     const scdMigrationSql = fs.readFileSync(scdMigrationPath, 'utf8');
     await pool.query(scdMigrationSql);
     console.log('✅ SCD Type 2 migration applied');
+  }
+
+  // Run attachments migration
+  const attachmentsMigrationPath = path.join(__dirname, '../migrations/005-attachments.sql');
+  if (fs.existsSync(attachmentsMigrationPath)) {
+    const attachmentsMigrationSql = fs.readFileSync(attachmentsMigrationPath, 'utf8');
+    await pool.query(attachmentsMigrationSql);
+    console.log('✅ Attachments migration applied');
   }
 
   // Bootstrap admin token

@@ -1,0 +1,26 @@
+import express from 'express';
+import cors from 'cors';
+import healthRouter from './routes/health.js';
+import messagesRouter from './routes/messages.js';
+import sourcesRouter from './routes/sources.js';
+import peopleRouter from './routes/people.js';
+import statsRouter from './routes/stats.js';
+import adminRouter from './routes/admin.js';
+import ingestRouter from './routes/ingest.js';
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+// API routes
+app.use('/api/health', healthRouter);
+app.use('/api/messages/ingest', ingestRouter);
+app.use('/api/messages', messagesRouter);
+app.use('/api/sources', sourcesRouter);
+app.use('/api/people', peopleRouter);
+app.use('/api/stats', statsRouter);
+app.use('/api/admin', adminRouter);
+
+export { app };
+export default app;
