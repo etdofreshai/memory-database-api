@@ -87,10 +87,12 @@ router.post('/enrich-all', requireAuth('write', 'admin'), async (req, res) => {
       ? `SELECT record_id, storage_path, mime_type, file_type, original_file_name
          FROM current_attachments
          WHERE summary_text IS NULL AND file_type = $1
+         AND storage_path LIKE '/memory/attachments/%'
          LIMIT $2`
       : `SELECT record_id, storage_path, mime_type, file_type, original_file_name
          FROM current_attachments
          WHERE summary_text IS NULL
+         AND storage_path LIKE '/memory/attachments/%'
          LIMIT $1`;
 
     const params = fileTypeParam ? [fileTypeParam, parsedLimit] : [parsedLimit];
