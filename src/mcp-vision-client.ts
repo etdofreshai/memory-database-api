@@ -185,10 +185,11 @@ export class McpVisionClient extends EventEmitter {
     const tool = this.tools.find(t => t.name === toolName);
     const schema = tool?.inputSchema?.properties || {};
 
-    if ('video_path' in schema) args.video_path = filePath;
+    if ('video_source' in schema) args.video_source = filePath;
+    else if ('video_path' in schema) args.video_path = filePath;
     else if ('file_path' in schema) args.file_path = filePath;
     else if ('path' in schema) args.path = filePath;
-    else args.video_path = filePath;
+    else args.video_source = filePath;
 
     if (prompt) {
       if ('prompt' in schema) args.prompt = prompt;
