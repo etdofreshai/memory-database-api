@@ -18,9 +18,9 @@ import pool from './db.js';
  * - Comprehensive logging and monitoring
  */
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const CLAUDE_API_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.claude_code_oauth_token;
-const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+const GEMINI_SUMMARIZER_URL = 'https://gemini-test.etdofresh.com/api/summarize';
+const GEMINI_DELETE_CONVERSATION_URL = 'https://gemini-test.etdofresh.com/api/conversation';
 
 // Rate limiting config (requests per minute)
 const RATE_LIMITS = {
@@ -70,7 +70,7 @@ const deadLetterQueue: EnrichmentQueueItem[] = [];
 
 // Log configuration at startup
 console.log('[Enrichments] System initialized:', {
-  geminiAvailable: !!GEMINI_API_KEY,
+  geminiSummarizerUrl: GEMINI_SUMMARIZER_URL,
   claudeAvailable: !!CLAUDE_API_TOKEN,
   rateLimits: {
     gemini: `${RATE_LIMITS.gemini} req/min`,
@@ -83,17 +83,15 @@ console.log('[Enrichments] System initialized:', {
  * Determine which enrichment method to use based on file type
  */
 function selectEnrichmentType(mimeType: string, fileType: string): EnrichmentType {
-  if (fileType === 'image' || fileType === 'video') {
+  // Images, video, audio → Gemini summarizer
+  if (fileType === 'image' || fileType === 'video' || fileType === 'audio') {
     return 'gemini_vision';
   }
-  if (fileType === 'audio') {
-    // Could use Gemini or Claude; preferring Gemini for audio
-    return 'gemini_vision';
+  // Text, PDFs, documents → Claude
+  if (fileType === 'document' || mimeType?.startsWith('text/') || mimeType?.includes('pdf')) {
+    return 'claude_text';
   }
-  if (fileType === 'document' && mimeType.includes('pdf')) {
-    return 'gemini_vision';
-  }
-  // Default to Gemini for most media
+  // Default to Gemini for unknown types
   return 'gemini_vision';
 }
 
@@ -125,89 +123,74 @@ function recordRequest(apiName: 'gemini' | 'claude'): void {
  * Enrich attachment with Gemini Vision API
  */
 async function enrichWithGemini(item: EnrichmentQueueItem): Promise<void> {
-  if (!GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY not configured');
-  }
-
   const { recordId, attachmentPath, mimeType, fileType, fileName } = item;
 
   if (!fs.existsSync(attachmentPath)) {
     throw new Error(`File not found: ${attachmentPath}`);
   }
 
+  // Use gemini-test.etdofresh.com/api/summarize (multipart form upload)
   const fileBuffer = fs.readFileSync(attachmentPath);
-  const base64Data = fileBuffer.toString('base64');
+  const blob = new Blob([fileBuffer], { type: mimeType || 'application/octet-stream' });
 
-  // Determine media type for Gemini
-  let mediaType = mimeType || 'application/octet-stream';
-  if (fileType === 'image') mediaType = `image/${mimeType?.split('/')[1] || 'jpeg'}`;
-  if (fileType === 'video') mediaType = `video/${mimeType?.split('/')[1] || 'mp4'}`;
-  if (fileType === 'audio') mediaType = `audio/${mimeType?.split('/')[1] || 'mpeg'}`;
+  const formData = new FormData();
+  formData.append('file', blob, fileName);
 
-  // Prepare Gemini request
-  const requestBody = {
-    contents: [
-      {
-        parts: [
-          {
-            inline_data: {
-              mime_type: mediaType,
-              data: base64Data,
-            },
-          },
-          {
-            text: `Please analyze this ${fileType} file and provide:
-1. A concise summary (2-3 sentences)
-2. Any visible text or OCR content (if applicable)
-3. Key objects, people, or items detected
-4. Relevant metadata or tags
-
-Respond in JSON format with keys: summary, ocr_text, labels (array), metadata (object).`,
-          },
-        ],
-      },
-    ],
-  };
-
-  const response = await fetch(
-    `${GEMINI_BASE_URL}/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    }
-  );
+  const response = await fetch(GEMINI_SUMMARIZER_URL, {
+    method: 'POST',
+    body: formData,
+  });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini API error (${response.status}): ${errorText}`);
+    throw new Error(`Gemini summarizer error (${response.status}): ${errorText}`);
   }
 
-  const result = await response.json();
-  const textContent = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+  const result = await response.json() as any;
+  const summaryText = result?.summary || '';
 
-  if (!textContent) {
-    throw new Error('No content from Gemini response');
+  if (!summaryText) {
+    throw new Error('No summary from Gemini summarizer response');
   }
 
-  // Parse JSON response from Gemini
-  let enrichmentData: any;
-  try {
-    // Try to extract JSON from the response (might be wrapped in markdown)
-    const jsonMatch = textContent.match(/\{[\s\S]*\}/);
-    enrichmentData = JSON.parse(jsonMatch ? jsonMatch[0] : textContent);
-  } catch {
-    // If parsing fails, create a basic structure
-    enrichmentData = {
-      summary: textContent.substring(0, 500),
-      ocr_text: '',
-      labels: [],
-      metadata: { raw_response: textContent },
-    };
-  }
+  // Parse the structured summary format:
+  // Raw Content, Title, Summary, File Description, Tags
+  const titleMatch = summaryText.match(/Title\n(.+)/);
+  const summaryMatch = summaryText.match(/Summary\n([\s\S]*?)(?:\n\n(?:File Description|Tags)|$)/);
+  const tagsMatch = summaryText.match(/Tags\n(.+)/);
+  const rawContentMatch = summaryText.match(/Raw Content\n([\s\S]*?)(?:\n\nTitle|$)/);
+
+  const title = titleMatch?.[1]?.trim() || '';
+  const summary = summaryMatch?.[1]?.trim() || summaryText.substring(0, 500);
+  const tags = tagsMatch?.[1]?.trim().split(/,\s*/).map((t: string) => t.trim()).filter(Boolean) || [];
+  const rawContent = rawContentMatch?.[1]?.trim() || '';
+
+  const enrichmentData = {
+    summary: title ? `${title}: ${summary}` : summary,
+    ocr_text: rawContent || null,
+    labels: tags,
+    metadata: {
+      model: result?.metadata?.modelName || 'gemini',
+      conversationId: result?.metadata?.conversationId,
+      analyzed_by: 'gemini-summarizer',
+    },
+  };
 
   // Store results in database
   await storeEnrichmentResults(recordId, enrichmentData);
+
+  // Clean up: delete the Gemini conversation to avoid clutter
+  const conversationId = result?.metadata?.conversationId;
+  if (conversationId) {
+    try {
+      await fetch(`${GEMINI_DELETE_CONVERSATION_URL}/${conversationId}`, {
+        method: 'DELETE',
+      });
+      console.log(`[gemini] Deleted conversation ${conversationId} for ${recordId}`);
+    } catch (err) {
+      console.warn(`[gemini] Failed to delete conversation ${conversationId}:`, err);
+    }
+  }
 }
 
 /**
@@ -250,16 +233,16 @@ async function enrichWithClaude(item: EnrichmentQueueItem): Promise<void> {
       throw new Error('Document is empty or unreadable');
     }
 
-    // Call Claude API using Anthropic SDK-style approach
+    // Call Claude API using OAuth token
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
-        'x-api-key': CLAUDE_API_TOKEN,
+        'authorization': `Bearer ${CLAUDE_API_TOKEN}`,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-sonnet-4-20250514',
         max_tokens: 1024,
         messages: [
           {
@@ -299,9 +282,16 @@ Respond in JSON format with keys: summary, key_topics (array of strings), labels
       enrichmentData = {
         summary: textContent.substring(0, 500),
         labels: labels,
-        metadata: { analyzed_by: 'claude' },
+        metadata: { model: 'claude-sonnet-4-20250514', analyzed_by: 'claude' },
       };
     }
+
+    // Ensure metadata has model info
+    enrichmentData.metadata = {
+      ...enrichmentData.metadata,
+      model: 'claude-sonnet-4-20250514',
+      analyzed_by: 'claude',
+    };
 
     // Merge labels from both sources
     if (Array.isArray(enrichmentData.labels)) {
@@ -329,13 +319,14 @@ async function storeEnrichmentResults(recordId: string, data: any): Promise<void
     metadata = {},
   } = data;
 
+  const model = metadata?.model || metadata?.analyzed_by || 'unknown';
   const now = new Date().toISOString();
 
   // Update attachment with enrichment results
   await pool.query(
-    `UPDATE attachments 
+    `UPDATE attachments
      SET summary_text = COALESCE($1, summary_text),
-         summary_model = 'gemini-2.0-flash',
+         summary_model = $7,
          summary_updated_at = $5,
          ocr_text = COALESCE($2, ocr_text),
          labels = $3::jsonb,
@@ -349,6 +340,7 @@ async function storeEnrichmentResults(recordId: string, data: any): Promise<void
       JSON.stringify(metadata),
       now,
       recordId,
+      model,
     ]
   );
 }
