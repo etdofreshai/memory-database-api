@@ -271,10 +271,71 @@ const RATE_LIMITS = {
   zai: 60,
 };
 
-// Queue config
-const CONCURRENCY = {
-  zai: 2,
+// Adaptive concurrency config
+const ADAPTIVE_CONCURRENCY = {
+  initial: 5,       // Start with 5 concurrent
+  min: 1,            // Never go below 1
+  max: 20,           // Cap at 20
+  increaseAfter: 10, // Increase after N consecutive successes
+  decreaseFactor: 0.5, // Halve on rate limit hit
+  increaseFactor: 1,   // Add 1 on success streak
 };
+
+// Adaptive concurrency state
+const adaptiveState = {
+  current: ADAPTIVE_CONCURRENCY.initial,
+  consecutiveSuccesses: 0,
+  consecutiveFailures: 0,
+  maxReached: ADAPTIVE_CONCURRENCY.initial,
+  totalSuccesses: 0,
+  totalRateLimitHits: 0,
+  lastAdjustment: Date.now(),
+  history: [] as Array<{ time: number; concurrency: number; reason: string }>,
+};
+
+function adjustConcurrencyUp() {
+  const prev = adaptiveState.current;
+  adaptiveState.current = Math.min(
+    adaptiveState.current + ADAPTIVE_CONCURRENCY.increaseFactor,
+    ADAPTIVE_CONCURRENCY.max
+  );
+  if (adaptiveState.current > prev) {
+    adaptiveState.maxReached = Math.max(adaptiveState.maxReached, adaptiveState.current);
+    adaptiveState.lastAdjustment = Date.now();
+    adaptiveState.history.push({ time: Date.now(), concurrency: adaptiveState.current, reason: `increased after ${ADAPTIVE_CONCURRENCY.increaseAfter} successes` });
+    console.log(`[adaptive] Concurrency increased: ${prev} → ${adaptiveState.current} (max reached: ${adaptiveState.maxReached})`);
+  }
+}
+
+function adjustConcurrencyDown() {
+  const prev = adaptiveState.current;
+  adaptiveState.current = Math.max(
+    Math.floor(adaptiveState.current * ADAPTIVE_CONCURRENCY.decreaseFactor),
+    ADAPTIVE_CONCURRENCY.min
+  );
+  adaptiveState.consecutiveSuccesses = 0;
+  adaptiveState.totalRateLimitHits++;
+  adaptiveState.lastAdjustment = Date.now();
+  adaptiveState.history.push({ time: Date.now(), concurrency: adaptiveState.current, reason: 'rate limit hit' });
+  // Keep only last 50 history entries
+  if (adaptiveState.history.length > 50) adaptiveState.history = adaptiveState.history.slice(-50);
+  console.log(`[adaptive] Concurrency decreased: ${prev} → ${adaptiveState.current} (rate limit hit #${adaptiveState.totalRateLimitHits})`);
+}
+
+function recordSuccess() {
+  adaptiveState.consecutiveSuccesses++;
+  adaptiveState.consecutiveFailures = 0;
+  adaptiveState.totalSuccesses++;
+  if (adaptiveState.consecutiveSuccesses >= ADAPTIVE_CONCURRENCY.increaseAfter) {
+    adjustConcurrencyUp();
+    adaptiveState.consecutiveSuccesses = 0;
+  }
+}
+
+function isRateLimitError(err: any): boolean {
+  const msg = err?.message || '';
+  return msg.includes('429') || msg.includes('rate limit') || msg.includes('Rate limit') || msg.includes('Too Many Requests');
+}
 
 // Retry config
 const MAX_RETRIES = 3;
@@ -322,7 +383,7 @@ console.log('[Enrichments] System initialized:', {
   rateLimits: {
     zai: `${RATE_LIMITS.zai} req/min`,
   },
-  concurrency: CONCURRENCY,
+  adaptiveConcurrency: `start=${ADAPTIVE_CONCURRENCY.initial}, min=${ADAPTIVE_CONCURRENCY.min}, max=${ADAPTIVE_CONCURRENCY.max}`,
 });
 
 /**
@@ -911,14 +972,20 @@ async function processNextItem(
     // Success
     const duration = Date.now() - startTime;
     queue.splice(itemIdx, 1);
+    recordSuccess();
     console.log(
-      `[${apiName}] Successfully enriched ${item.recordId} in ${duration}ms`
+      `[${apiName}] Successfully enriched ${item.recordId} in ${duration}ms (concurrency: ${adaptiveState.current})`
     );
     item.resolve();
   } catch (err: any) {
     const error = err as Error;
     item.lastError = error.message;
     const duration = Date.now() - startTime;
+
+    // Check for rate limit errors → adjust concurrency down
+    if (isRateLimitError(err)) {
+      adjustConcurrencyDown();
+    }
 
     // Check if error is non-retryable
     const isNoRetry = (err as any).noRetry === true;
@@ -952,9 +1019,9 @@ async function processNextItem(
  */
 async function processQueue(): Promise<void> {
   if (paused) return;
-  // Process Z.AI queue
-  if (
-    processing.zai < CONCURRENCY.zai &&
+  // Process Z.AI queue — spin up workers up to adaptive concurrency limit
+  while (
+    processing.zai < adaptiveState.current &&
     canMakeRequest('zai') &&
     queue.some(item => item.enrichmentType === 'zai')
   ) {
@@ -1010,6 +1077,16 @@ export function getQueueStatus() {
     pending: queue.length,
     processing: {
       zai: processing.zai,
+    },
+    adaptiveConcurrency: {
+      current: adaptiveState.current,
+      min: ADAPTIVE_CONCURRENCY.min,
+      max: ADAPTIVE_CONCURRENCY.max,
+      maxReached: adaptiveState.maxReached,
+      consecutiveSuccesses: adaptiveState.consecutiveSuccesses,
+      totalSuccesses: adaptiveState.totalSuccesses,
+      totalRateLimitHits: adaptiveState.totalRateLimitHits,
+      recentHistory: adaptiveState.history.slice(-10),
     },
     rateLimits: {
       zai: {
