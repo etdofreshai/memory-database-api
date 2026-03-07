@@ -25,7 +25,7 @@ const ZAI_TOKEN = process.env.ZAI_TOKEN || process.env.Z_AI_TOKEN || process.env
 const Z_AI_BASE_URL = process.env.Z_AI_BASE_URL || 'https://open.bigmodel.cn/api/coding/paas/v4';
 // Fallback for standard endpoint (uncomment if using free tier)
 // const Z_AI_BASE_URL = process.env.Z_AI_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
-const Z_AI_MODEL = process.env.Z_AI_MODEL || 'glm-4.6';
+const Z_AI_MODEL = process.env.Z_AI_MODEL || 'glm-5';
 
 // Rate limiting config (requests per minute)
 const RATE_LIMITS = {
