@@ -76,7 +76,7 @@ router.post('/enrich-attachment/:record_id', requireAuth('write', 'admin'), asyn
  * POST /api/enrichments/enrich-all
  * Trigger enrichment for all attachments that don't have summary_text yet
  */
-router.post('/enrich-all', requireAuth('admin'), async (req, res) => {
+router.post('/enrich-all', requireAuth('write', 'admin'), async (req, res) => {
   try {
     const limitParam = Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit || '100';
     const fileTypeParam = Array.isArray(req.query.file_type) ? req.query.file_type[0] : req.query.file_type;
@@ -145,7 +145,7 @@ router.post('/enrich-all', requireAuth('admin'), async (req, res) => {
  * POST /api/enrichments/retry-failed
  * Retry all items in the dead letter queue
  */
-router.post('/retry-failed', requireAuth('admin'), async (req, res) => {
+router.post('/retry-failed', requireAuth('write', 'admin'), async (req, res) => {
   try {
     const status = getQueueStatus();
     const deadLetterCount = status.deadLetterCount;
