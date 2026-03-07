@@ -59,6 +59,46 @@ async function convertHeicIfNeeded(filePath: string): Promise<{ path: string; cl
 }
 
 /**
+ * Convert GIF to JPEG (first frame) if needed
+ * Returns path to use (either original or converted temp file)
+ */
+async function convertGifIfNeeded(filePath: string): Promise<{ path: string; cleanup?: () => void }> {
+  const ext = path.extname(filePath).toLowerCase();
+  
+  if (ext !== '.gif') {
+    return { path: filePath };
+  }
+  
+  console.log(`[convert] Converting GIF to JPEG: ${path.basename(filePath)}`);
+  
+  try {
+    const tempDir = os.tmpdir();
+    const baseName = path.basename(filePath, ext);
+    const tempPath = path.join(tempDir, `converted-${Date.now()}-${baseName}.jpg`);
+    
+    // Use sharp to extract first frame and convert to JPEG
+    await sharp(filePath, { pages: 1 })
+      .jpeg({ quality: 90 })
+      .toFile(tempPath);
+    
+    const newStats = fs.statSync(tempPath);
+    console.log(`[convert] Converted GIF to JPEG (${(newStats.size / 1024 / 1024).toFixed(2)}MB)`);
+    
+    return {
+      path: tempPath,
+      cleanup: () => {
+        try {
+          fs.unlinkSync(tempPath);
+        } catch {}
+      }
+    };
+  } catch (err: any) {
+    console.error(`[convert] GIF conversion failed: ${err.message}`);
+    throw new Error(`Failed to convert GIF to JPEG: ${err.message}`);
+  }
+}
+
+/**
  * Resize image if it exceeds max size
  * Returns path to use (either original or resized temp file)
  */
@@ -116,7 +156,12 @@ async function prepareImageForMcp(filePath: string): Promise<{ path: string; cle
   currentPath = converted.path;
   if (converted.cleanup) cleanups.push(converted.cleanup);
   
-  // Step 2: Resize if too large
+  // Step 2: Convert GIF to JPEG (first frame) if needed
+  const gif = await convertGifIfNeeded(currentPath);
+  currentPath = gif.path;
+  if (gif.cleanup) cleanups.push(gif.cleanup);
+  
+  // Step 3: Resize if too large
   const resized = await resizeImageIfNeeded(currentPath);
   currentPath = resized.path;
   if (resized.cleanup) cleanups.push(resized.cleanup);
