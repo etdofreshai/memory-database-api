@@ -356,6 +356,14 @@ Tags
 async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
   const { recordId, attachmentPath, mimeType, fileType, fileName } = item;
 
+  // Skip non-analyzable file types immediately (no retry)
+  const ext = path.extname(attachmentPath).toLowerCase();
+  if (SKIP_EXTENSIONS.has(ext)) {
+    const noRetry = new Error(`Skipped: ${ext} files are not analyzable media (e.g. iMessage link preview)`);
+    (noRetry as any).noRetry = true;
+    throw noRetry;
+  }
+
   if (!ZAI_TOKEN) {
     throw new Error('ZAI_TOKEN not configured. Set ZAI_TOKEN environment variable.');
   }
