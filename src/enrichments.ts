@@ -588,15 +588,42 @@ async function enrichWithMcpVision(item: EnrichmentQueueItem): Promise<void> {
 async function enrichWithZaiDirect(item: EnrichmentQueueItem): Promise<void> {
   const { recordId, attachmentPath, mimeType, fileType, fileName } = item;
 
-  const fileBuffer = fs.readFileSync(attachmentPath);
-  const base64Data = fileBuffer.toString('base64');
-  const dataUrl = `data:${mimeType || 'application/octet-stream'};base64,${base64Data}`;
   const prompt = buildZaiPrompt(fileType, fileName);
+  let userContent: any[];
 
-  const userContent: any[] = [
-    { type: 'image_url', image_url: { url: dataUrl } },
-    { type: 'text', text: prompt },
-  ];
+  // For text-based files, read as text and send as plain text message
+  const isTextBased = fileType === 'document' || fileType === 'text' ||
+    mimeType?.startsWith('text/') || mimeType?.includes('pdf') ||
+    mimeType?.includes('json') || mimeType?.includes('xml') ||
+    fileName?.endsWith('.pdf') || fileName?.endsWith('.txt') ||
+    fileName?.endsWith('.csv') || fileName?.endsWith('.json') ||
+    fileName?.endsWith('.md') || fileName?.endsWith('.html');
+
+  if (isTextBased) {
+    // Read file as text (best effort — binary PDFs will be garbled but we try)
+    let textContent: string;
+    try {
+      textContent = fs.readFileSync(attachmentPath, 'utf-8');
+      // Truncate to ~8000 chars to fit in context window
+      if (textContent.length > 8000) {
+        textContent = textContent.substring(0, 8000) + '\n\n[... truncated ...]';
+      }
+    } catch {
+      textContent = `[Could not read file as text: ${fileName}]`;
+    }
+    userContent = [
+      { type: 'text', text: `${prompt}\n\nFile content (${fileName}):\n\n${textContent}` },
+    ];
+  } else {
+    // For images/media, send as base64
+    const fileBuffer = fs.readFileSync(attachmentPath);
+    const base64Data = fileBuffer.toString('base64');
+    const dataUrl = `data:${mimeType || 'application/octet-stream'};base64,${base64Data}`;
+    userContent = [
+      { type: 'image_url', image_url: { url: dataUrl } },
+      { type: 'text', text: prompt },
+    ];
+  }
 
   const response = await fetch(`${Z_AI_BASE_URL}/chat/completions`, {
     method: 'POST',
