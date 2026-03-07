@@ -478,7 +478,7 @@ async function enrichPluginPayloadAttachment(item: EnrichmentQueueItem): Promise
  * For text enrichment via Z.AI coding endpoint: uses direct API
  */
 async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
-  const { attachmentPath, fileType, fileName } = item;
+  const { attachmentPath, mimeType, fileType, fileName } = item;
 
   const ext = path.extname(attachmentPath).toLowerCase();
 
