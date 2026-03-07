@@ -371,7 +371,7 @@ Retry all failed items from the dead letter queue.
 
 1. Verify API keys are set:
    ```bash
-   echo $Z_AI_TOKEN
+   echo $ZAI_TOKEN
    echo $CLAUDE_CODE_OAUTH_TOKEN
    ```
 

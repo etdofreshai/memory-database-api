@@ -170,7 +170,7 @@ Both APIs return rate limit info in response headers:
 async function enrichWithZ.AI(item: EnrichmentQueueItem): Promise<void> {
   // ... existing code ...
   
-  const response = await fetch(`${Z_AI_BASE_URL}/zai-2.0-flash:generateContent?key=${Z_AI_TOKEN}`, {
+  const response = await fetch(`${Z_AI_BASE_URL}/zai-2.0-flash:generateContent?key=${ZAI_TOKEN}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(requestBody),
@@ -328,7 +328,7 @@ watch 'curl -s http://localhost:3000/api/enrichments/queue-status -H "Authorizat
 
 ```bash
 # .env.test
-Z_AI_TOKEN="AIzaSyDxx..."
+ZAI_TOKEN="AIzaSyDxx..."
 CLAUDE_CODE_OAUTH_TOKEN="sk-ant-xxx..."
 NODE_ENV="test"
 ```

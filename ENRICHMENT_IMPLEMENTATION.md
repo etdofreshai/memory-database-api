@@ -124,7 +124,7 @@ Body: {
 
 ```bash
 # Required for Z.AI enrichment
-Z_AI_TOKEN=<your-api-key>
+ZAI_TOKEN=<your-api-key>
 
 # Required for Claude enrichment (Claude Sonnet model)
 CLAUDE_CODE_OAUTH_TOKEN=<your-token>
@@ -387,7 +387,7 @@ npm start
 ### Environment Setup
 
 ```bash
-export Z_AI_TOKEN=your-key
+export ZAI_TOKEN=your-key
 export CLAUDE_CODE_OAUTH_TOKEN=your-token
 export DATABASE_URL=postgresql://...
 npm start
@@ -397,7 +397,7 @@ npm start
 
 ```dockerfile
 # Uses existing Dockerfile
-# Just needs Z_AI_TOKEN and CLAUDE_CODE_OAUTH_TOKEN env vars
+# Just needs ZAI_TOKEN and CLAUDE_CODE_OAUTH_TOKEN env vars
 ```
 
 ## Future Enhancements
@@ -446,7 +446,7 @@ Adjust concurrency/rate limits based on your budget.
 ### Common Issues
 
 **Queue not processing:**
-- Check env vars: `echo $Z_AI_TOKEN`
+- Check env vars: `echo $ZAI_TOKEN`
 - Check logs: `docker logs memory-database-api | grep Enrichments`
 - Verify API keys work: test directly with API
 

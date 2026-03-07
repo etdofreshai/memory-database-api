@@ -19,7 +19,7 @@ import pool from './db.js';
  */
 
 const CLAUDE_API_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.claude_code_oauth_token;
-const Z_AI_TOKEN = process.env.Z_AI_TOKEN || process.env.z_ai_token;
+const ZAI_TOKEN = process.env.ZAI_TOKEN || process.env.Z_AI_TOKEN || process.env.z_ai_token;
 const Z_AI_BASE_URL = process.env.Z_AI_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
 const Z_AI_MODEL = process.env.Z_AI_MODEL || 'glm-4v-flash';
 
@@ -69,16 +69,16 @@ const rateLimiter: RateLimitTracker = {
 };
 const deadLetterQueue: EnrichmentQueueItem[] = [];
 
-// Validate Z_AI_TOKEN at startup
-if (!Z_AI_TOKEN) {
-  console.warn('[Enrichments] WARNING: Z_AI_TOKEN is not set. Z.AI enrichments will fail. Set Z_AI_TOKEN (or z_ai_token) environment variable.');
+// Validate ZAI_TOKEN at startup
+if (!ZAI_TOKEN) {
+  console.warn('[Enrichments] WARNING: ZAI_TOKEN is not set. Z.AI enrichments will fail. Set ZAI_TOKEN (or Z_AI_TOKEN, z_ai_token as fallbacks) environment variable.');
 }
 
 // Log configuration at startup
 console.log('[Enrichments] System initialized:', {
   zaiModel: Z_AI_MODEL,
   zaiBaseUrl: Z_AI_BASE_URL,
-  zaiTokenSet: !!Z_AI_TOKEN,
+  zaiTokenSet: !!ZAI_TOKEN,
   claudeAvailable: !!CLAUDE_API_TOKEN,
   rateLimits: {
     zai: `${RATE_LIMITS.zai} req/min`,
@@ -160,8 +160,8 @@ Tags
 async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
   const { recordId, attachmentPath, mimeType, fileType, fileName } = item;
 
-  if (!Z_AI_TOKEN) {
-    throw new Error('Z_AI_TOKEN not configured. Set Z_AI_TOKEN environment variable.');
+  if (!ZAI_TOKEN) {
+    throw new Error('ZAI_TOKEN not configured. Set ZAI_TOKEN environment variable.');
   }
 
   if (!fs.existsSync(attachmentPath)) {
@@ -201,7 +201,7 @@ async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
   const response = await fetch(`${Z_AI_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${Z_AI_TOKEN}`,
+      'Authorization': `Bearer ${ZAI_TOKEN}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({

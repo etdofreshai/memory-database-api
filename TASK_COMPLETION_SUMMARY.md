@@ -93,7 +93,7 @@ All requirements have been successfully implemented, tested, and documented.
 ### 1. Setup
 ```bash
 cd /data/workspace/tmp/memory-database-api
-export Z_AI_TOKEN=your-key
+export ZAI_TOKEN=your-key
 export CLAUDE_CODE_OAUTH_TOKEN=your-token
 npm run build
 npm start
@@ -173,7 +173,7 @@ src/routes/ingest.ts             ← Added queueing
 
 ### Required Environment
 ```bash
-Z_AI_TOKEN=                 # Get from: aistudio.google.com
+ZAI_TOKEN=                 # Get from: aistudio.google.com
 CLAUDE_CODE_OAUTH_TOKEN=        # Get from: console.anthropic.com
 ```
 
@@ -252,7 +252,7 @@ To deploy:
 
 1. **Set environment variables:**
    ```bash
-   export Z_AI_TOKEN=your-key
+   export ZAI_TOKEN=your-key
    export CLAUDE_CODE_OAUTH_TOKEN=your-token
    ```
 

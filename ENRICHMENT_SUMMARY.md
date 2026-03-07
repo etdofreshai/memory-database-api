@@ -57,7 +57,7 @@ Per-minute reset + concurrency check before each request
 ### Environment Variables
 ```bash
 # Required
-Z_AI_TOKEN="AIzaSyD..."
+ZAI_TOKEN="AIzaSyD..."
 CLAUDE_CODE_OAUTH_TOKEN="sk-ant-..." # or claude_code_oauth_token
 
 # Optional
@@ -121,7 +121,7 @@ curl -X POST http://localhost:3000/api/enrichments/retry-failed \
 cd /data/workspace/tmp/memory-database-api
 
 # Set env vars
-export Z_AI_TOKEN="your-key"
+export ZAI_TOKEN="your-key"
 export CLAUDE_CODE_OAUTH_TOKEN="your-key"
 
 # Start
@@ -138,7 +138,7 @@ FROM node:20-alpine
 WORKDIR /app
 COPY . .
 RUN npm ci
-ENV Z_AI_TOKEN=xxx
+ENV ZAI_TOKEN=xxx
 ENV CLAUDE_CODE_OAUTH_TOKEN=xxx
 CMD ["npm", "start"]
 ```
@@ -184,7 +184,7 @@ CMD ["npm", "start"]
 
 ## 🎯 Quick Start Checklist
 
-- [ ] Set `Z_AI_TOKEN` env var
+- [ ] Set `ZAI_TOKEN` env var
 - [ ] Set `CLAUDE_CODE_OAUTH_TOKEN` env var
 - [ ] Run `npm start`
 - [ ] Test: POST to `/api/messages/ingest` with a file

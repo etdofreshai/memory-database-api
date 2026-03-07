@@ -58,7 +58,7 @@ src/
 ```
 
 ### Configuration
-- **Environment variables:** `Z_AI_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`
+- **Environment variables:** `ZAI_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`
 - **Tuning parameters:** Edit `src/enrichments.ts` RATE_LIMITS and CONCURRENCY
 
 ### Documentation Structure
@@ -231,7 +231,7 @@ Root directory:
 
 ### Environment Setup
 ```bash
-export Z_AI_TOKEN=your-key
+export ZAI_TOKEN=your-key
 export CLAUDE_CODE_OAUTH_TOKEN=your-token
 npm run build && npm start
 ```

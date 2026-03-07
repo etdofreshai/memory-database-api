@@ -35,7 +35,7 @@ The enrichment system provides asynchronous, queued processing of attachment fil
 
 ```bash
 # Required for Z.AI enrichment
-Z_AI_TOKEN=<your-zai-api-key>
+ZAI_TOKEN=<your-zai-api-key>
 
 # Required for Claude enrichment
 CLAUDE_CODE_OAUTH_TOKEN=<your-claude-token>
@@ -274,7 +274,7 @@ The system logs to stdout:
 # Check what failed
 curl http://localhost:3000/api/enrichments/queue-status
 
-# Fix the issue (e.g., update Z_AI_TOKEN), then:
+# Fix the issue (e.g., update ZAI_TOKEN), then:
 curl -X POST http://localhost:3000/api/enrichments/retry-failed
 ```
 
@@ -339,7 +339,7 @@ tail -f /var/log/memory-database-api.log | grep "Enrichments"
 
 Verify env vars:
 ```bash
-echo $Z_AI_TOKEN
+echo $ZAI_TOKEN
 echo $CLAUDE_CODE_OAUTH_TOKEN
 ```
 

@@ -5,7 +5,7 @@
 The enrichment system is already integrated! Just set environment variables and restart:
 
 ```bash
-export Z_AI_TOKEN=your-zai-key
+export ZAI_TOKEN=your-zai-key
 export CLAUDE_CODE_OAUTH_TOKEN=your-claude-token
 npm start
 ```
@@ -78,7 +78,7 @@ curl -X POST http://localhost:3000/api/enrichments/retry-failed \
 |---------|----------|
 | `pending` stays high | Increase `CONCURRENCY` in `src/enrichments.ts` |
 | Items in dead letter | Check logs for API errors, update keys, retry |
-| "API key missing" | Set `Z_AI_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` |
+| "API key missing" | Set `ZAI_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` |
 | Rate limit errors | Reduce `RATE_LIMITS` values in `src/enrichments.ts` |
 
 ## File Locations

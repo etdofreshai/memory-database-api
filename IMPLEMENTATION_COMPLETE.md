@@ -100,7 +100,7 @@ PATCH endpoint handles field updates automatically.
 
 ```bash
 # Required for Z.AI enrichment
-export Z_AI_TOKEN="your-zai-api-key"
+export ZAI_TOKEN="your-zai-api-key"
 
 # Required for Claude enrichment
 export CLAUDE_CODE_OAUTH_TOKEN="your-claude-token"
@@ -135,7 +135,7 @@ cd /data/workspace/tmp/memory-database-api
 npm run build
 
 # Start with env vars
-Z_AI_TOKEN=your-key CLAUDE_CODE_OAUTH_TOKEN=your-token npm start
+ZAI_TOKEN=your-key CLAUDE_CODE_OAUTH_TOKEN=your-token npm start
 ```
 
 ### Test Enrichment
@@ -241,7 +241,7 @@ curl http://localhost:3000/api/attachments/[record_id] \
 
 ## Deployment Checklist
 
-- [ ] Set `Z_AI_TOKEN` environment variable
+- [ ] Set `ZAI_TOKEN` environment variable
 - [ ] Set `CLAUDE_CODE_OAUTH_TOKEN` environment variable
 - [ ] Run `npm run build` to compile
 - [ ] Start service: `npm start`

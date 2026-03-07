@@ -18,7 +18,7 @@ Features:
 
 ```bash
 # Required for vision/media enrichment
-export Z_AI_TOKEN="your-zai-api-key"
+export ZAI_TOKEN="your-zai-api-key"
 
 # Required for text/document enrichment
 export CLAUDE_CODE_OAUTH_TOKEN="your-claude-oauth-token"
@@ -248,7 +248,7 @@ ORDER BY summary_updated_at DESC;
 ## Troubleshooting
 
 ### All enrichments failing with "API_KEY not configured"
-- Check env vars: `echo $Z_AI_TOKEN $CLAUDE_CODE_OAUTH_TOKEN`
+- Check env vars: `echo $ZAI_TOKEN $CLAUDE_CODE_OAUTH_TOKEN`
 - Restart the API: `npm start` or `docker-compose restart`
 
 ### Rate limit errors (429)
