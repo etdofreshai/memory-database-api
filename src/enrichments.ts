@@ -5,6 +5,7 @@ import pool from './db.js';
 import sharp from 'sharp';
 import convert from 'heic-convert';
 import { getMcpVisionClient, shutdownMcpVisionClient } from './mcp-vision-client.js';
+import { parsePluginPayloadAttachment } from './plugin-payload-parser.js';
 
 // Max image size for MCP vision server (5MB)
 const MAX_IMAGE_SIZE_MB = 5;
@@ -149,7 +150,6 @@ async function resizeImageIfNeeded(filePath: string): Promise<{ path: string; cl
  */
 // File types we can't process — skip gracefully
 const SKIP_EXTENSIONS = new Set([
-  '.pluginpayloadattachment', // iMessage link preview cards (binary plist, not media)
   '.caf',   // Core Audio Format (unsupported by MCP)
   '.amr',   // Adaptive Multi-Rate audio
   '.oga',   // Ogg audio
@@ -347,6 +347,93 @@ Tags
   return base;
 }
 
+function buildPluginPayloadSummary(data: {
+  title?: string;
+  description?: string;
+  url?: string;
+}): string {
+  const title = data.title?.trim();
+  const description = data.description?.trim();
+  const url = data.url?.trim();
+
+  if (!title && !description && !url) {
+    return 'iMessage link preview card (no extractable content)';
+  }
+
+  const titlePart = title || 'Untitled';
+  const descPart = description || 'No description';
+  const urlPart = url || 'unknown';
+
+  return `iMessage Link Preview: ${titlePart} — ${descPart} (URL: ${urlPart})`;
+}
+
+async function enrichPluginPayloadAttachment(item: EnrichmentQueueItem): Promise<void> {
+  const { recordId, attachmentPath } = item;
+
+  const parsed = await parsePluginPayloadAttachment(attachmentPath);
+
+  const labels = new Set<string>(['link-preview', 'imessage']);
+  if (parsed.siteName) labels.add(parsed.siteName.toLowerCase());
+  if (parsed.url) {
+    try {
+      labels.add(new URL(parsed.url).hostname.replace(/^www\./i, '').toLowerCase());
+    } catch {}
+  }
+
+  const baseSummary = buildPluginPayloadSummary(parsed);
+
+  let imageSummary = '';
+  let tempPreparedCleanup: (() => void) | undefined;
+
+  try {
+    if (parsed.thumbnailPath && fs.existsSync(parsed.thumbnailPath)) {
+      const prepared = await prepareImageForMcp(parsed.thumbnailPath);
+      tempPreparedCleanup = prepared.cleanup;
+
+      const client = getMcpVisionClient();
+      const vision = await client.analyzeImage(
+        prepared.path,
+        'Describe this iMessage link preview thumbnail image in 1-2 concise sentences.'
+      );
+
+      if (vision?.trim()) {
+        imageSummary = vision.trim();
+        labels.add('thumbnail');
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[pluginPayload] Thumbnail analysis failed for ${item.fileName}: ${err?.message || err}`);
+  } finally {
+    if (tempPreparedCleanup) tempPreparedCleanup();
+    if (parsed.thumbnailPath) {
+      try {
+        fs.unlinkSync(parsed.thumbnailPath);
+      } catch {}
+    }
+  }
+
+  const finalSummary = imageSummary
+    ? `${baseSummary}\nThumbnail analysis: ${imageSummary}`
+    : baseSummary;
+
+  await storeEnrichmentResults(recordId, {
+    summary: finalSummary,
+    ocr_text: parsed.rawData || null,
+    labels: [...labels],
+    metadata: {
+      model: imageSummary ? 'plugin-payload-parser+mcp-vision' : 'plugin-payload-parser',
+      analyzed_by: imageSummary ? 'plugin-payload+mcp-vision' : 'plugin-payload-parser',
+      plugin_payload: {
+        url: parsed.url || null,
+        title: parsed.title || null,
+        description: parsed.description || null,
+        site_name: parsed.siteName || null,
+        creator: parsed.creator || null,
+      },
+    },
+  });
+}
+
 /**
  * Enrich attachment with Z.AI GLM Vision via MCP Server
  * 
@@ -356,10 +443,17 @@ Tags
 async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
   const { recordId, attachmentPath, mimeType, fileType, fileName } = item;
 
-  // Skip non-analyzable file types immediately (no retry)
   const ext = path.extname(attachmentPath).toLowerCase();
+
+  // Special handling for iMessage link preview cards (binary plist)
+  if (ext === '.pluginpayloadattachment') {
+    await enrichPluginPayloadAttachment(item);
+    return;
+  }
+
+  // Skip non-analyzable file types immediately (no retry)
   if (SKIP_EXTENSIONS.has(ext)) {
-    const noRetry = new Error(`Skipped: ${ext} files are not analyzable media (e.g. iMessage link preview)`);
+    const noRetry = new Error(`Skipped: ${ext} files are not analyzable media`);
     (noRetry as any).noRetry = true;
     throw noRetry;
   }
