@@ -248,8 +248,7 @@ async function prepareImageForMcp(filePath: string): Promise<{ path: string; cle
  * Enrichment System for Memory Database API
  * 
  * Handles async enrichment of attachments using:
- * - Z.AI (GLM-4.6V) for images, videos, audio, documents (OCR, summaries, metadata)
- * - Claude Agent SDK for text-based analysis and enrichment
+ * - Z.AI (GLM-5) for images, videos, audio, documents (OCR, summaries, metadata)
  * 
  * Features:
  * - Queued processing to avoid overloading APIs
@@ -260,7 +259,6 @@ async function prepareImageForMcp(filePath: string): Promise<{ path: string; cle
  * - Comprehensive logging and monitoring
  */
 
-const CLAUDE_API_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.claude_code_oauth_token;
 const ZAI_TOKEN = process.env.ZAI_TOKEN || process.env.Z_AI_TOKEN || process.env.z_ai_token;
 // Use coding endpoint for subscription plans (supports text, limited multimodal)
 const Z_AI_BASE_URL = process.env.Z_AI_BASE_URL || 'https://open.bigmodel.cn/api/coding/paas/v4';
@@ -271,20 +269,18 @@ const Z_AI_MODEL = process.env.Z_AI_MODEL || 'glm-5';
 // Rate limiting config (requests per minute)
 const RATE_LIMITS = {
   zai: 60,
-  claude: 30,
 };
 
 // Queue config
 const CONCURRENCY = {
   zai: 2,
-  claude: 1,
 };
 
 // Retry config
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
 
-type EnrichmentType = 'zai_vision' | 'claude_text';
+type EnrichmentType = 'zai';
 
 interface EnrichmentQueueItem {
   recordId: string;
@@ -302,15 +298,13 @@ interface EnrichmentQueueItem {
 
 interface RateLimitTracker {
   zai: { lastReset: number; count: number };
-  claude: { lastReset: number; count: number };
 }
 
 // Global state
 const queue: EnrichmentQueueItem[] = [];
-const processing = { zai: 0, claude: 0 };
+const processing = { zai: 0 };
 const rateLimiter: RateLimitTracker = {
   zai: { lastReset: Date.now(), count: 0 },
-  claude: { lastReset: Date.now(), count: 0 },
 };
 const deadLetterQueue: EnrichmentQueueItem[] = [];
 let paused = false;
@@ -325,10 +319,8 @@ console.log('[Enrichments] System initialized:', {
   zaiModel: Z_AI_MODEL,
   zaiBaseUrl: Z_AI_BASE_URL,
   zaiTokenSet: !!ZAI_TOKEN,
-  claudeAvailable: !!CLAUDE_API_TOKEN,
   rateLimits: {
     zai: `${RATE_LIMITS.zai} req/min`,
-    claude: `${RATE_LIMITS.claude} req/min`,
   },
   concurrency: CONCURRENCY,
 });
@@ -336,23 +328,15 @@ console.log('[Enrichments] System initialized:', {
 /**
  * Determine which enrichment method to use based on file type
  */
-function selectEnrichmentType(mimeType: string, fileType: string): EnrichmentType {
-  // Images, video, audio → Z.AI GLM vision
-  if (fileType === 'image' || fileType === 'video' || fileType === 'audio') {
-    return 'zai_vision';
-  }
-  // Text, PDFs, documents → Claude
-  if (fileType === 'document' || mimeType?.startsWith('text/') || mimeType?.includes('pdf')) {
-    return 'claude_text';
-  }
-  // Default to Z.AI for unknown types
-  return 'zai_vision';
+function selectEnrichmentType(_mimeType: string, _fileType: string): EnrichmentType {
+  // Route all enrichment through Z.AI (MCP for vision/media, direct API fallback for text/docs)
+  return 'zai';
 }
 
 /**
  * Check if we can make a request to the given API (respects rate limits)
  */
-function canMakeRequest(apiName: 'zai' | 'claude'): boolean {
+function canMakeRequest(apiName: 'zai'): boolean {
   const tracker = rateLimiter[apiName];
   const now = Date.now();
   const limit = RATE_LIMITS[apiName];
@@ -369,7 +353,7 @@ function canMakeRequest(apiName: 'zai' | 'claude'): boolean {
 /**
  * Record an API request for rate limiting
  */
-function recordRequest(apiName: 'zai' | 'claude'): void {
+function recordRequest(apiName: 'zai'): void {
   rateLimiter[apiName].count++;
 }
 
@@ -494,7 +478,7 @@ async function enrichPluginPayloadAttachment(item: EnrichmentQueueItem): Promise
  * For text enrichment via Z.AI coding endpoint: uses direct API
  */
 async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
-  const { recordId, attachmentPath, mimeType, fileType, fileName } = item;
+  const { attachmentPath, fileType, fileName } = item;
 
   const ext = path.extname(attachmentPath).toLowerCase();
 
@@ -517,6 +501,12 @@ async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
 
   if (!fs.existsSync(attachmentPath)) {
     throw new Error(`File not found: ${attachmentPath}`);
+  }
+
+  // Route text/documents directly through Z.AI coding API (GLM-5)
+  if (fileType === 'document' || fileType === 'text') {
+    await enrichWithZaiDirect(item);
+    return;
   }
 
   // For images and video, use MCP Vision Server
@@ -683,121 +673,6 @@ function parseStructuredSummary(text: string): {
 }
 
 /**
- * Enrich attachment with Claude analysis
- * 
- * Uses Claude API for detailed text-based analysis
- */
-async function enrichWithClaude(item: EnrichmentQueueItem): Promise<void> {
-  if (!CLAUDE_API_TOKEN) {
-    throw new Error('CLAUDE_CODE_OAUTH_TOKEN not configured');
-  }
-
-  const { recordId, attachmentPath, fileType, mimeType, fileName } = item;
-
-  if (!fs.existsSync(attachmentPath)) {
-    throw new Error(`File not found: ${attachmentPath}`);
-  }
-
-  let fileContent = '';
-  let labels: string[] = [];
-
-  try {
-    // Handle different document types
-    if (mimeType === 'application/pdf') {
-      // For PDFs, extract first 5000 characters as text
-      // In production, use a proper PDF parser
-      const buffer = fs.readFileSync(attachmentPath);
-      fileContent = buffer.toString('binary').substring(0, 5000);
-      labels.push('pdf', 'document');
-    } else if (fileType === 'document' || mimeType?.startsWith('text/')) {
-      fileContent = fs.readFileSync(attachmentPath, 'utf-8').substring(0, 10000);
-      labels.push('document', 'text');
-    } else {
-      // Skip non-text files for Claude
-      console.log(`Skipping Claude enrichment for non-text file: ${fileName}`);
-      return;
-    }
-
-    if (!fileContent.trim()) {
-      throw new Error('Document is empty or unreadable');
-    }
-
-    // Call Claude API using OAuth token
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'authorization': `Bearer ${CLAUDE_API_TOKEN}`,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
-        messages: [
-          {
-            role: 'user',
-            content: `Please analyze this document and provide:
-1. A concise 2-3 sentence summary
-2. Key entities or topics mentioned
-3. Suggested labels/tags (as a JSON array)
-
-Document content (first 10000 chars):
-${fileContent}
-
-Respond in JSON format with keys: summary, key_topics (array of strings), labels (array of strings).`,
-          },
-        ],
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      throw new Error(`Claude API error (${response.status}): ${errorData}`);
-    }
-
-    const result = await response.json();
-    const textContent = result?.content?.[0]?.text;
-
-    if (!textContent) {
-      throw new Error('No content from Claude response');
-    }
-
-    // Parse JSON from Claude response
-    let enrichmentData: any;
-    try {
-      const jsonMatch = textContent.match(/\{[\s\S]*\}/);
-      enrichmentData = JSON.parse(jsonMatch ? jsonMatch[0] : textContent);
-    } catch {
-      enrichmentData = {
-        summary: textContent.substring(0, 500),
-        labels: labels,
-        metadata: { model: 'claude-sonnet-4-20250514', analyzed_by: 'claude' },
-      };
-    }
-
-    // Ensure metadata has model info
-    enrichmentData.metadata = {
-      ...enrichmentData.metadata,
-      model: 'claude-sonnet-4-20250514',
-      analyzed_by: 'claude',
-    };
-
-    // Merge labels from both sources
-    if (Array.isArray(enrichmentData.labels)) {
-      enrichmentData.labels = [...new Set([...labels, ...enrichmentData.labels])];
-    } else {
-      enrichmentData.labels = labels;
-    }
-
-    // Store results
-    await storeEnrichmentResults(recordId, enrichmentData);
-  } catch (err) {
-    console.error(`Claude enrichment error for ${fileName}:`, err);
-    throw err;
-  }
-}
-
-/**
  * Store enrichment results in the database
  */
 async function storeEnrichmentResults(recordId: string, data: any): Promise<void> {
@@ -838,16 +713,10 @@ async function storeEnrichmentResults(recordId: string, data: any): Promise<void
  * Process next item in the queue (for a specific API)
  */
 async function processNextItem(
-  apiName: 'zai' | 'claude'
+  apiName: 'zai'
 ): Promise<void> {
   // Find next item for this API
-  const itemIdx = queue.findIndex(item => {
-    if (apiName === 'zai') {
-      return item.enrichmentType === 'zai_vision';
-    } else {
-      return item.enrichmentType === 'claude_text';
-    }
-  });
+  const itemIdx = queue.findIndex(item => item.enrichmentType === 'zai');
 
   if (itemIdx === -1) return; // No items for this API
 
@@ -857,11 +726,7 @@ async function processNextItem(
   try {
     console.log(`[${apiName}] Starting enrichment for ${item.recordId} (${item.fileName})`);
 
-    if (apiName === 'zai') {
-      await enrichWithZai(item);
-    } else {
-      await enrichWithClaude(item);
-    }
+    await enrichWithZai(item);
 
     // Success
     const duration = Date.now() - startTime;
@@ -911,7 +776,7 @@ async function processQueue(): Promise<void> {
   if (
     processing.zai < CONCURRENCY.zai &&
     canMakeRequest('zai') &&
-    queue.some(item => item.enrichmentType === 'zai_vision')
+    queue.some(item => item.enrichmentType === 'zai')
   ) {
     processing.zai++;
     recordRequest('zai');
@@ -923,21 +788,6 @@ async function processQueue(): Promise<void> {
       });
   }
 
-  // Process Claude queue
-  if (
-    processing.claude < CONCURRENCY.claude &&
-    canMakeRequest('claude') &&
-    queue.some(item => item.enrichmentType === 'claude_text')
-  ) {
-    processing.claude++;
-    recordRequest('claude');
-    processNextItem('claude')
-      .catch(err => console.error('Claude processing error:', err))
-      .finally(() => {
-        processing.claude--;
-        processQueue();
-      });
-  }
 }
 
 /**
@@ -980,16 +830,11 @@ export function getQueueStatus() {
     pending: queue.length,
     processing: {
       zai: processing.zai,
-      claude: processing.claude,
     },
     rateLimits: {
       zai: {
         used: rateLimiter.zai.count,
         limit: RATE_LIMITS.zai,
-      },
-      claude: {
-        used: rateLimiter.claude.count,
-        limit: RATE_LIMITS.claude,
       },
     },
     deadLetterCount: deadLetterQueue.length,
