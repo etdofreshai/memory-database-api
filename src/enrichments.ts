@@ -21,7 +21,7 @@ import pool from './db.js';
 const CLAUDE_API_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.claude_code_oauth_token;
 const ZAI_TOKEN = process.env.ZAI_TOKEN || process.env.Z_AI_TOKEN || process.env.z_ai_token;
 const Z_AI_BASE_URL = process.env.Z_AI_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
-const Z_AI_MODEL = process.env.Z_AI_MODEL || 'glm-4v-flash';
+const Z_AI_MODEL = process.env.Z_AI_MODEL || 'glm-4.6';
 
 // Rate limiting config (requests per minute)
 const RATE_LIMITS = {
