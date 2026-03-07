@@ -68,6 +68,7 @@ const rateLimiter: RateLimitTracker = {
   claude: { lastReset: Date.now(), count: 0 },
 };
 const deadLetterQueue: EnrichmentQueueItem[] = [];
+let paused = false;
 
 // Validate ZAI_TOKEN at startup
 if (!ZAI_TOKEN) {
@@ -478,6 +479,7 @@ async function processNextItem(
  * Main queue processor
  */
 async function processQueue(): Promise<void> {
+  if (paused) return;
   // Process Z.AI queue
   if (
     processing.zai < CONCURRENCY.zai &&
@@ -547,6 +549,7 @@ export function queueEnrichment(
  */
 export function getQueueStatus() {
   return {
+    paused,
     pending: queue.length,
     processing: {
       zai: processing.zai,
@@ -585,4 +588,38 @@ export function retryDeadLetters(): void {
   }
 
   processQueue();
+}
+
+/**
+ * Pause queue processing (items already in-flight will finish)
+ */
+export function pauseQueue(): void {
+  paused = true;
+}
+
+/**
+ * Resume queue processing
+ */
+export function resumeQueue(): void {
+  paused = false;
+  processQueue();
+}
+
+/**
+ * Cancel all pending items in the queue (does not affect in-flight)
+ */
+export function cancelPending(): number {
+  const count = queue.length;
+  for (const item of queue) {
+    item.reject(new Error('Cancelled'));
+  }
+  queue.length = 0;
+  return count;
+}
+
+/**
+ * Check if queue is paused
+ */
+export function isPaused(): boolean {
+  return paused;
 }

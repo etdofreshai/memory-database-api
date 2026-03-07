@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import pool from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
-import { queueEnrichment, getQueueStatus, retryDeadLetters } from '../enrichments.js';
+import { queueEnrichment, getQueueStatus, retryDeadLetters, pauseQueue, resumeQueue, cancelPending, isPaused } from '../enrichments.js';
 
 const router = Router();
 
@@ -161,6 +161,51 @@ router.post('/retry-failed', requireAuth('write', 'admin'), async (req, res) => 
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+/**
+ * GET /api/enrichments/unsummarized-count
+ * Count of attachments missing summary_text
+ */
+router.get('/unsummarized-count', requireAuth('read', 'write', 'admin'), async (req, res) => {
+  try {
+    const fileTypeParam = Array.isArray(req.query.file_type) ? req.query.file_type[0] : req.query.file_type;
+    const query = fileTypeParam
+      ? `SELECT COUNT(*)::int as count FROM current_attachments WHERE summary_text IS NULL AND file_type = $1`
+      : `SELECT COUNT(*)::int as count FROM current_attachments WHERE summary_text IS NULL`;
+    const params = fileTypeParam ? [fileTypeParam] : [];
+    const result = await pool.query(query, params);
+    res.json({ count: result.rows[0]?.count || 0 });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/enrichments/pause
+ * Pause queue processing
+ */
+router.post('/pause', requireAuth('write', 'admin'), async (_req, res) => {
+  pauseQueue();
+  res.json({ paused: true, message: 'Queue paused. In-flight items will complete.' });
+});
+
+/**
+ * POST /api/enrichments/resume
+ * Resume queue processing
+ */
+router.post('/resume', requireAuth('write', 'admin'), async (_req, res) => {
+  resumeQueue();
+  res.json({ paused: false, message: 'Queue resumed.' });
+});
+
+/**
+ * POST /api/enrichments/cancel-pending
+ * Cancel all pending (not in-flight) items
+ */
+router.post('/cancel-pending', requireAuth('admin'), async (_req, res) => {
+  const cancelled = cancelPending();
+  res.json({ cancelled, message: `${cancelled} pending items cancelled.` });
 });
 
 export default router;

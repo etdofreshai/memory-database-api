@@ -231,6 +231,8 @@ function AttachmentsTab({ headers, token }: { headers: Record<string, string>; t
   const [selected, setSelected] = useState<any>(null);
   const [linkedMsgs, setLinkedMsgs] = useState<any[]>([]);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
+  // per-row summarize status
+  const [summarizing, setSummarizing] = useState<Record<string, 'loading' | 'success' | 'error'>>({});
 
   useEffect(() => {
     setLoading(true); setError('');
@@ -248,6 +250,44 @@ function AttachmentsTab({ headers, token }: { headers: Record<string, string>; t
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [page, q, mimeType, fileType, privacy, sha256, recordId]);
+
+  const reloadPage = useCallback(() => {
+    setLoading(true); setError('');
+    const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE), sort: 'imported_at', order: 'desc' });
+    if (q) params.set('q', q);
+    if (mimeType) params.set('mime_type', mimeType);
+    if (fileType) params.set('file_type', fileType);
+    if (privacy) params.set('privacy_level', privacy);
+    if (sha256) params.set('sha256', sha256);
+    if (recordId) params.set('record_id', recordId);
+    fetch(`${BASE}/api/attachments?${params}`, { headers })
+      .then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); })
+      .then(d => { setRows(d.attachments || []); setTotal(d.total || 0); setTotalPages(d.totalPages || 1); })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [page, q, mimeType, fileType, privacy, sha256, recordId]);
+
+  async function summarizeAttachment(e: React.MouseEvent, recordId: string) {
+    e.stopPropagation();
+    setSummarizing(prev => ({ ...prev, [recordId]: 'loading' }));
+    try {
+      const res = await fetch(`${BASE}/api/enrichments/enrich-attachment/${recordId}`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || 'Failed');
+      }
+      setSummarizing(prev => ({ ...prev, [recordId]: 'success' }));
+      // Refresh row after a delay to let enrichment process
+      setTimeout(() => reloadPage(), 3000);
+    } catch {
+      setSummarizing(prev => ({ ...prev, [recordId]: 'error' }));
+    }
+    // Clear status after 5s
+    setTimeout(() => setSummarizing(prev => { const n = { ...prev }; delete n[recordId]; return n; }), 5000);
+  }
 
   function openDetail(a: any) {
     setSelected(a);
@@ -283,7 +323,7 @@ function AttachmentsTab({ headers, token }: { headers: Record<string, string>; t
       <div style={{ overflowX: 'auto' }}>
         <table>
           <thead><tr>
-            {['ID', 'Filename', 'MIME', 'File Type', 'Size', 'Privacy', 'Imported', 'Links'].map(h =>
+            {['ID', 'Filename', 'MIME', 'Type', 'Size', 'Summary', 'Imported', ''].map(h =>
               <th key={h} style={{ padding: '6px 4px', textAlign: 'left' }}>{h}</th>)}
           </tr></thead>
           <tbody>
@@ -292,7 +332,7 @@ function AttachmentsTab({ headers, token }: { headers: Record<string, string>; t
               : rows.map(a => (
                 <tr key={a.id} onClick={() => openDetail(a)} style={{ cursor: 'pointer' }}>
                   <td style={{ padding: '6px 4px' }}>{a.id}</td>
-                  <td style={{ padding: '6px 4px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <td style={{ padding: '6px 4px', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     <AttachmentLink recordId={a.record_id} mimeType={a.mime_type} fileName={a.original_file_name} token={token}>
                       {a.original_file_name || '📎 Preview'}
                     </AttachmentLink>
@@ -300,9 +340,26 @@ function AttachmentsTab({ headers, token }: { headers: Record<string, string>; t
                   <td style={{ padding: '6px 4px' }}>{a.mime_type || '—'}</td>
                   <td style={{ padding: '6px 4px' }}>{a.file_type || '—'}</td>
                   <td style={{ padding: '6px 4px' }}>{a.size_bytes ? `${(a.size_bytes / 1024).toFixed(1)} KB` : '—'}</td>
-                  <td style={{ padding: '6px 4px' }}>{a.privacy_level || '—'}</td>
+                  <td style={{ padding: '6px 4px', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: a.summary_text ? '#aaa' : '#555' }}
+                    title={a.summary_text || ''}>
+                    {a.summary_text ? a.summary_text.slice(0, 80) + (a.summary_text.length > 80 ? '…' : '') : '—'}
+                  </td>
                   <td style={{ padding: '6px 4px', whiteSpace: 'nowrap' }}>{a.imported_at ? new Date(a.imported_at).toLocaleString() : '—'}</td>
-                  <td style={{ padding: '6px 4px', textAlign: 'center' }}>{a.link_count || 0}</td>
+                  <td style={{ padding: '6px 4px', textAlign: 'center' }}>
+                    {summarizing[a.record_id] === 'loading' ? (
+                      <span style={{ fontSize: 12, color: '#888' }}>⏳</span>
+                    ) : summarizing[a.record_id] === 'success' ? (
+                      <span style={{ fontSize: 12, color: '#4caf50' }}>✓</span>
+                    ) : summarizing[a.record_id] === 'error' ? (
+                      <span style={{ fontSize: 12, color: '#ff6b6b' }}>✗</span>
+                    ) : (
+                      <button onClick={(e) => summarizeAttachment(e, a.record_id)}
+                        style={{ fontSize: 11, padding: '2px 8px', cursor: 'pointer', background: '#1e3a5f', color: '#64b5f6', border: '1px solid #64b5f6', borderRadius: 3 }}
+                        title="Trigger enrichment for this attachment">
+                        Summarize
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
           </tbody>
