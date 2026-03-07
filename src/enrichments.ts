@@ -271,8 +271,8 @@ const RATE_LIMITS = {
   zai: 60,
 };
 
-// Adaptive concurrency config
-const ADAPTIVE_CONCURRENCY = {
+// Adaptive concurrency config (mutable — updated via API)
+let ADAPTIVE_CONCURRENCY = {
   initial: 5,       // Start with 5 concurrent
   min: 1,            // Never go below 1
   max: 20,           // Cap at 20
@@ -1082,6 +1082,7 @@ export function getQueueStatus() {
       current: adaptiveState.current,
       min: ADAPTIVE_CONCURRENCY.min,
       max: ADAPTIVE_CONCURRENCY.max,
+      increment: ADAPTIVE_CONCURRENCY.increaseFactor,
       maxReached: adaptiveState.maxReached,
       consecutiveSuccesses: adaptiveState.consecutiveSuccesses,
       totalSuccesses: adaptiveState.totalSuccesses,
@@ -1151,6 +1152,39 @@ export function cancelPending(): number {
  */
 export function isPaused(): boolean {
   return paused;
+}
+
+/**
+ * Update adaptive concurrency settings
+ */
+export function updateAdaptiveSettings(settings: {
+  current?: number;
+  min?: number;
+  max?: number;
+  increment?: number;
+}): { current: number; min: number; max: number; increment: number } {
+  if (settings.min !== undefined) {
+    ADAPTIVE_CONCURRENCY.min = Math.max(1, settings.min);
+  }
+  if (settings.max !== undefined) {
+    ADAPTIVE_CONCURRENCY.max = Math.max(ADAPTIVE_CONCURRENCY.min, settings.max);
+  }
+  if (settings.increment !== undefined) {
+    ADAPTIVE_CONCURRENCY.increaseFactor = Math.max(1, settings.increment);
+  }
+  if (settings.current !== undefined) {
+    adaptiveState.current = Math.max(ADAPTIVE_CONCURRENCY.min, Math.min(settings.current, ADAPTIVE_CONCURRENCY.max));
+  }
+  // Clamp current to new bounds
+  adaptiveState.current = Math.max(ADAPTIVE_CONCURRENCY.min, Math.min(adaptiveState.current, ADAPTIVE_CONCURRENCY.max));
+  adaptiveState.history.push({ time: Date.now(), concurrency: adaptiveState.current, reason: 'manual adjustment' });
+  console.log(`[adaptive] Settings updated: current=${adaptiveState.current}, min=${ADAPTIVE_CONCURRENCY.min}, max=${ADAPTIVE_CONCURRENCY.max}, increment=${ADAPTIVE_CONCURRENCY.increaseFactor}`);
+  return {
+    current: adaptiveState.current,
+    min: ADAPTIVE_CONCURRENCY.min,
+    max: ADAPTIVE_CONCURRENCY.max,
+    increment: ADAPTIVE_CONCURRENCY.increaseFactor,
+  };
 }
 
 /**

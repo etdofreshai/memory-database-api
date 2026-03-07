@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import pool from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
-import { queueEnrichment, getQueueStatus, retryDeadLetters, pauseQueue, resumeQueue, cancelPending, isPaused } from '../enrichments.js';
+import { queueEnrichment, getQueueStatus, retryDeadLetters, pauseQueue, resumeQueue, cancelPending, isPaused, updateAdaptiveSettings } from '../enrichments.js';
 
 const router = Router();
 
@@ -206,6 +206,20 @@ router.post('/resume', requireAuth('write', 'admin'), async (_req, res) => {
 router.post('/cancel-pending', requireAuth('admin'), async (_req, res) => {
   const cancelled = cancelPending();
   res.json({ cancelled, message: `${cancelled} pending items cancelled.` });
+});
+
+/**
+ * POST /api/enrichments/adaptive-settings
+ * Update adaptive concurrency settings
+ * Body: { current?, min?, max?, increment? }
+ */
+router.post('/adaptive-settings', requireAuth('write', 'admin'), async (req, res) => {
+  try {
+    const result = updateAdaptiveSettings(req.body);
+    res.json({ ...result, message: 'Adaptive settings updated' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;

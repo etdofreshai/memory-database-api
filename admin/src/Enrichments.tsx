@@ -6,6 +6,16 @@ interface QueueStatus {
   processing: {
     zai: number;
   };
+  adaptiveConcurrency: {
+    current: number;
+    min: number;
+    max: number;
+    maxReached: number;
+    consecutiveSuccesses: number;
+    totalSuccesses: number;
+    totalRateLimitHits: number;
+    recentHistory: Array<{ time: number; concurrency: number; reason: string }>;
+  };
   rateLimits: {
     zai: { used: number; limit: number };
   };
@@ -48,6 +58,10 @@ export default function Enrichments() {
   const [unsummarizedCount, setUnsummarizedCount] = useState<number | null>(null);
   const [backfillLimit, setBackfillLimit] = useState('100');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [concurrencyInput, setConcurrencyInput] = useState('5');
+  const [incrementInput, setIncrementInput] = useState('1');
+  const [minInput, setMinInput] = useState('1');
+  const [maxInput, setMaxInput] = useState('20');
 
   const headers = useMemo(() => token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : {}, [token]);
 
@@ -64,6 +78,11 @@ export default function Enrichments() {
       const data = await res.json();
       setStatus(data);
       setError('');
+      if (data.adaptiveConcurrency) {
+        setConcurrencyInput(String(data.adaptiveConcurrency.current));
+        setMinInput(String(data.adaptiveConcurrency.min));
+        setMaxInput(String(data.adaptiveConcurrency.max));
+      }
     } catch (err: any) {
       setError(err?.message || 'Failed to load status');
     } finally {
@@ -250,6 +269,95 @@ export default function Enrichments() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Adaptive Concurrency */}
+      {status?.adaptiveConcurrency && (
+        <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 14, marginBottom: 16 }}>
+          <h2 style={{ marginTop: 0 }}>🎚️ Adaptive Concurrency</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
+            <div>
+              <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#888' }}>CURRENT</p>
+              <p style={{ margin: 0, fontSize: 24, fontWeight: 'bold', color: '#4caf50' }}>{status.adaptiveConcurrency.current}</p>
+            </div>
+            <div>
+              <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#888' }}>MAX REACHED</p>
+              <p style={{ margin: 0, fontSize: 24, fontWeight: 'bold', color: '#2196f3' }}>{status.adaptiveConcurrency.maxReached}</p>
+            </div>
+            <div>
+              <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#888' }}>SUCCESSES</p>
+              <p style={{ margin: 0, fontSize: 24, fontWeight: 'bold' }}>{status.adaptiveConcurrency.totalSuccesses}</p>
+            </div>
+            <div>
+              <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#888' }}>RATE LIMIT HITS</p>
+              <p style={{ margin: 0, fontSize: 24, fontWeight: 'bold', color: status.adaptiveConcurrency.totalRateLimitHits > 0 ? '#ff6b6b' : 'inherit' }}>
+                {status.adaptiveConcurrency.totalRateLimitHits}
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
+            <div>
+              <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Concurrency</label>
+              <input type="number" min="1" max="100" value={concurrencyInput}
+                onChange={e => setConcurrencyInput(e.target.value)}
+                style={{ width: 60 }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Increment</label>
+              <input type="number" min="1" max="20" value={incrementInput}
+                onChange={e => setIncrementInput(e.target.value)}
+                style={{ width: 60 }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Floor</label>
+              <input type="number" min="1" max="100" value={minInput}
+                onChange={e => setMinInput(e.target.value)}
+                style={{ width: 60 }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Ceiling</label>
+              <input type="number" min="1" max="100" value={maxInput}
+                onChange={e => setMaxInput(e.target.value)}
+                style={{ width: 60 }} />
+            </div>
+            <button onClick={async () => {
+              try {
+                const res = await fetch(`${BASE}/api/enrichments/adaptive-settings`, {
+                  method: 'POST', headers,
+                  body: JSON.stringify({
+                    current: Number(concurrencyInput),
+                    increment: Number(incrementInput),
+                    min: Number(minInput),
+                    max: Number(maxInput),
+                  }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data?.error || 'Failed');
+                showToast(`Concurrency updated to ${data.current} (floor: ${data.min}, ceiling: ${data.max}, increment: ${data.increment})`, 'success');
+                await loadStatus();
+              } catch (err: any) {
+                showToast(err?.message || 'Failed', 'error');
+              }
+            }} style={{ background: '#2196f3', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}>
+              Apply
+            </button>
+          </div>
+          <p style={{ margin: 0, fontSize: 12, color: '#888' }}>
+            Streak: {status.adaptiveConcurrency.consecutiveSuccesses} / 10 successes until next increase
+          </p>
+          {status.adaptiveConcurrency.recentHistory.length > 0 && (
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ fontSize: 12, color: '#888', cursor: 'pointer' }}>Recent adjustments</summary>
+              <div style={{ fontSize: 12, marginTop: 4 }}>
+                {status.adaptiveConcurrency.recentHistory.map((h, i) => (
+                  <div key={i} style={{ color: '#aaa', marginBottom: 2 }}>
+                    {new Date(h.time).toLocaleTimeString()} → {h.concurrency} ({h.reason})
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
         </div>
       )}
 
