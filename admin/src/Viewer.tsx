@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { AttachmentLink, AttachmentPreviewModal } from './AttachmentPreview.js';
 
 const BASE = import.meta.env.BASE_URL.replace(/\/admin\/?$/, '');
 const PAGE_SIZE = 50;
@@ -55,7 +56,7 @@ function DetailModal({ title, data, onClose, children }: { title: string; data?:
 // ═══════════════════════════════════════════════
 //  MESSAGES TAB
 // ═══════════════════════════════════════════════
-function MessagesTab({ headers, sources }: { headers: Record<string, string>; sources: SourceRow[] }) {
+function MessagesTab({ headers, sources, token }: { headers: Record<string, string>; sources: SourceRow[]; token: string }) {
   const [messages, setMessages] = useState<any[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -187,7 +188,13 @@ function MessagesTab({ headers, sources }: { headers: Record<string, string>; so
               </tr></thead>
               <tbody>{linkedAtts.map((a: any, i: number) => (
                 <tr key={i}>
-                  <td style={{ padding: '4px 6px' }}>{a.original_file_name || '—'}</td>
+                  <td style={{ padding: '4px 6px' }}>
+                    {a.attachment_record_id ? (
+                      <AttachmentLink recordId={a.attachment_record_id} mimeType={a.mime_type} fileName={a.original_file_name} token={token}>
+                        {a.original_file_name || '📎 Preview'}
+                      </AttachmentLink>
+                    ) : (a.original_file_name || '—')}
+                  </td>
                   <td style={{ padding: '4px 6px' }}>{a.mime_type || '—'}</td>
                   <td style={{ padding: '4px 6px' }}>{a.size_bytes ? `${(a.size_bytes / 1024).toFixed(1)} KB` : '—'}</td>
                   <td style={{ padding: '4px 6px' }}>{a.role || '—'}</td>
@@ -205,7 +212,7 @@ function MessagesTab({ headers, sources }: { headers: Record<string, string>; so
 // ═══════════════════════════════════════════════
 //  ATTACHMENTS TAB
 // ═══════════════════════════════════════════════
-function AttachmentsTab({ headers }: { headers: Record<string, string> }) {
+function AttachmentsTab({ headers, token }: { headers: Record<string, string>; token: string }) {
   const [rows, setRows] = useState<any[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -285,7 +292,11 @@ function AttachmentsTab({ headers }: { headers: Record<string, string> }) {
               : rows.map(a => (
                 <tr key={a.id} onClick={() => openDetail(a)} style={{ cursor: 'pointer' }}>
                   <td style={{ padding: '6px 4px' }}>{a.id}</td>
-                  <td style={{ padding: '6px 4px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.original_file_name || '—'}</td>
+                  <td style={{ padding: '6px 4px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <AttachmentLink recordId={a.record_id} mimeType={a.mime_type} fileName={a.original_file_name} token={token}>
+                      {a.original_file_name || '📎 Preview'}
+                    </AttachmentLink>
+                  </td>
                   <td style={{ padding: '6px 4px' }}>{a.mime_type || '—'}</td>
                   <td style={{ padding: '6px 4px' }}>{a.file_type || '—'}</td>
                   <td style={{ padding: '6px 4px' }}>{a.size_bytes ? `${(a.size_bytes / 1024).toFixed(1)} KB` : '—'}</td>
@@ -311,6 +322,11 @@ function AttachmentsTab({ headers }: { headers: Record<string, string> }) {
             <strong>Privacy:</strong><span>{selected.privacy_level}</span>
             <strong>Storage:</strong><span>{selected.storage_provider} — {selected.storage_path || selected.url_local || '—'}</span>
             <strong>Imported:</strong><span>{selected.imported_at ? new Date(selected.imported_at).toLocaleString() : '—'}</span>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <AttachmentLink recordId={selected.record_id} mimeType={selected.mime_type} fileName={selected.original_file_name} token={token}>
+              👁️ Preview File
+            </AttachmentLink>
           </div>
           {selected.summary_text && (
             <div style={{ marginBottom: 8 }}><strong>Summary:</strong> {selected.summary_text}</div>
@@ -497,8 +513,8 @@ export default function Viewer() {
       </div>
 
       {/* Tab content */}
-      {tab === 'messages' && <MessagesTab headers={headers} sources={sources} />}
-      {tab === 'attachments' && <AttachmentsTab headers={headers} />}
+      {tab === 'messages' && <MessagesTab headers={headers} sources={sources} token={token} />}
+      {tab === 'attachments' && <AttachmentsTab headers={headers} token={token} />}
       {tab === 'links' && <LinksTab headers={headers} />}
     </div>
   );

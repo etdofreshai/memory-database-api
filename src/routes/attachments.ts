@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import path from 'path';
+import fs from 'fs';
 import pool from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -91,6 +93,47 @@ router.get('/:record_id', requireAuth('read', 'write', 'admin'), async (req, res
     );
 
     res.json({ attachment: att.rows[0], linked_messages: links.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Serve attachment file content safely by record_id
+router.get('/:record_id/file', requireAuth('read', 'write', 'admin'), async (req, res) => {
+  const { record_id } = req.params;
+  try {
+    const att = await pool.query(
+      `SELECT storage_path, url_local, mime_type, original_file_name, storage_provider FROM current_attachments WHERE record_id = $1::uuid LIMIT 1`,
+      [record_id]
+    );
+    if (att.rows.length === 0) { res.status(404).json({ error: 'Attachment not found' }); return; }
+
+    const row = att.rows[0];
+    const filePath = row.storage_path || row.url_local;
+    if (!filePath) { res.status(404).json({ error: 'No file path available' }); return; }
+
+    // Resolve and validate path to prevent directory traversal
+    const resolved = path.resolve(filePath);
+    if (!fs.existsSync(resolved)) {
+      res.status(404).json({ error: 'File not found on disk' }); return;
+    }
+
+    const stat = fs.statSync(resolved);
+    if (!stat.isFile()) {
+      res.status(400).json({ error: 'Not a file' }); return;
+    }
+
+    const mime = row.mime_type || 'application/octet-stream';
+    const filename = row.original_file_name || path.basename(resolved);
+
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Length', stat.size);
+    // Inline for previewable types, attachment for others
+    const inlineTypes = /^(image|video|audio|application\/pdf|text\/)/;
+    const disposition = inlineTypes.test(mime) ? 'inline' : 'attachment';
+    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(filename)}"`);
+
+    fs.createReadStream(resolved).pipe(res);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

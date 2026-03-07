@@ -8,11 +8,13 @@ export interface AuthRequest extends Request {
 export function requireAuth(...allowed: string[]) {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
     const header = req.headers.authorization;
-    if (!header?.startsWith('Bearer ')) {
+    // Support ?token= query param for media elements (img/video/audio src can't send headers)
+    const queryToken = typeof req.query.token === 'string' ? req.query.token : '';
+    if (!header?.startsWith('Bearer ') && !queryToken) {
       res.status(401).json({ error: 'Missing Bearer token' });
       return;
     }
-    const token = header.slice(7);
+    const token = queryToken || header!.slice(7);
     try {
       const result = await pool.query(
         'SELECT id, label, permissions, write_sources FROM api_tokens WHERE token = $1 AND is_active = true',

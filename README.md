@@ -31,6 +31,7 @@ DATABASE_URL=postgresql://... npm start
 - `GET /api/messages/:record_id/attachments` — Linked attachments for a message
 - `GET /api/attachments?q=&mime_type=&file_type=&privacy_level=&sha256=&record_id=&page=&limit=` — List/filter attachments
 - `GET /api/attachments/:record_id` — Single attachment + linked messages
+- `GET /api/attachments/:record_id/file` — Serve attachment file content (supports `?token=` query param for media elements)
 - `GET /api/links?message_record_id=&attachment_record_id=&provider=&role=&q=&page=&limit=` — List/filter message-attachment links
 - `/admin` — Admin dashboard
 - `/admin/viewer` — Data viewer (messages, attachments, links)
@@ -66,6 +67,18 @@ The `/admin/viewer` page provides a tabbed interface for inspecting all three co
 - **Links** — browse message↔attachment links, filter by message/attachment record ID and provider. Click for full detail with cross-references.
 
 All tabs support pagination and click-to-detail modals with raw JSON inspection.
+
+### Attachment Preview
+
+Clicking an attachment filename in any table or detail modal opens an inline preview modal with type-appropriate rendering:
+
+- **Images** (jpg, png, gif, webp, etc.) — `<img>` preview
+- **Video** (mp4, webm, mov, etc.) — `<video>` with controls
+- **Audio** (mp3, m4a, wav, amr, etc.) — `<audio>` with controls
+- **PDF** — `<iframe>` embed
+- **Other types** — download/open-in-new-tab fallback
+
+Files are served via `/api/attachments/:record_id/file` which reads from `storage_path`/`url_local` on disk. Authentication is passed via `?token=` query parameter (required for `<img>`/`<video>`/`<audio>` src attributes that can't send Authorization headers). Missing or unreachable files show an error state with an "open in new tab" fallback link.
 
 ## Migrations
 
