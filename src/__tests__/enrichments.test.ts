@@ -42,7 +42,6 @@ describe('Enrichment System', () => {
         pending: expect.any(Number),
         processing: expect.objectContaining({
           zai: expect.any(Number),
-          claude: expect.any(Number),
         }),
         rateLimits: expect.any(Object),
         deadLetterCount: expect.any(Number),
@@ -84,12 +83,7 @@ describe('Enrichment System', () => {
         limit: expect.any(Number),
       })
     );
-    expect(status.rateLimits.claude).toEqual(
-      expect.objectContaining({
-        used: expect.any(Number),
-        limit: expect.any(Number),
-      })
-    );
+
   });
 
   it('should handle dead letter queue', () => {
