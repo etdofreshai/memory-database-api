@@ -20,7 +20,10 @@ import pool from './db.js';
 
 const CLAUDE_API_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.claude_code_oauth_token;
 const ZAI_TOKEN = process.env.ZAI_TOKEN || process.env.Z_AI_TOKEN || process.env.z_ai_token;
-const Z_AI_BASE_URL = process.env.Z_AI_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
+// Use coding endpoint for subscription plans (supports text, limited multimodal)
+const Z_AI_BASE_URL = process.env.Z_AI_BASE_URL || 'https://open.bigmodel.cn/api/coding/paas/v4';
+// Fallback for standard endpoint (uncomment if using free tier)
+// const Z_AI_BASE_URL = process.env.Z_AI_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
 const Z_AI_MODEL = process.env.Z_AI_MODEL || 'glm-4.6';
 
 // Rate limiting config (requests per minute)
@@ -219,6 +222,26 @@ async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
 
   if (!response.ok) {
     const errorText = await response.text();
+    // Check for non-retryable errors (balance, auth, model not found)
+    try {
+      const errJson = JSON.parse(errorText);
+      const code = errJson?.error?.code;
+      if (code === 1113) {
+        // Insufficient balance - don't retry, fail immediately
+        const noRetry = new Error(`Z.AI balance exhausted (code 1113): ${errJson?.error?.message}`);
+        (noRetry as any).noRetry = true;
+        throw noRetry;
+      }
+      if (code === 1211) {
+        // Model doesn't exist - don't retry
+        const noRetry = new Error(`Z.AI model not found (code 1211): ${errJson?.error?.message}`);
+        (noRetry as any).noRetry = true;
+        throw noRetry;
+      }
+    } catch (parseErr: any) {
+      if (parseErr.noRetry) throw parseErr;
+      // Continue with generic error if parsing failed
+    }
     throw new Error(`Z.AI API error (${response.status}): ${errorText}`);
   }
 
@@ -451,7 +474,10 @@ async function processNextItem(
     item.lastError = error.message;
     const duration = Date.now() - startTime;
 
-    if (item.retries < MAX_RETRIES) {
+    // Check if error is non-retryable
+    const isNoRetry = (err as any).noRetry === true;
+
+    if (!isNoRetry && item.retries < MAX_RETRIES) {
       // Retry with exponential backoff
       item.retries++;
       const backoffMs = INITIAL_BACKOFF_MS * Math.pow(2, item.retries - 1);
