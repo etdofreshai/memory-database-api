@@ -129,9 +129,9 @@ async function compressVideoIfNeeded(filePath: string): Promise<{ path: string; 
     const duration = parseFloat(durationStr) || 10;
     const targetBitrate = Math.floor((targetBytes * 8) / duration / 1000); // kbps
     
-    // Compress with ffmpeg: reduce resolution to 720p max, limit bitrate
+    // Compress with ffmpeg: reduce resolution to 720p max, pad to even dimensions, limit bitrate
     execSync(
-      `ffmpeg -i "${filePath}" -vf "scale='min(720,iw)':'min(720,ih)':force_original_aspect_ratio=decrease" -c:v libx264 -b:v ${targetBitrate}k -maxrate ${targetBitrate * 2}k -bufsize ${targetBitrate * 4}k -preset fast -an -y "${tempPath}"`,
+      `ffmpeg -i "${filePath}" -vf "scale='min(720,iw)':'min(720,ih)':force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2" -c:v libx264 -b:v ${targetBitrate}k -maxrate ${targetBitrate * 2}k -bufsize ${targetBitrate * 4}k -preset fast -an -y "${tempPath}"`,
       { timeout: 120000, stdio: 'pipe' }
     );
     
