@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Viewer from './Viewer.js';
 import Embeddings from './Embeddings.js';
+import Enrichments from './Enrichments.js';
 
 interface Token {
   id: number; label: string; permissions: string; write_sources: string[] | null;
@@ -100,6 +101,7 @@ function AdminPanel() {
       <div style={{ marginBottom: 12, display: 'flex', gap: 12 }}>
         <a href={`${BASE}/admin/viewer`}>Open Viewer →</a>
         <a href={`${BASE}/admin/embeddings`}>Open Embeddings →</a>
+        <a href={`${BASE}/admin/enrichments`}>Open Enrichments →</a>
       </div>
       <div style={{ marginBottom: '1rem' }}>
         <input placeholder="Admin token" type="password" value={adminToken} onChange={e => setAdminToken(e.target.value)} style={{ width: 400, marginRight: 8 }} />
@@ -166,6 +168,9 @@ export default function App() {
   }
   if (path.startsWith('/admin/embeddings')) {
     return <Embeddings />;
+  }
+  if (path.startsWith('/admin/enrichments')) {
+    return <Enrichments />;
   }
   return <AdminPanel />;
 }
