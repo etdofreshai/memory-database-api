@@ -503,6 +503,12 @@ async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
     throw new Error(`File not found: ${attachmentPath}`);
   }
 
+  // PDFs: render pages as images → MCP vision per page → combine summaries
+  if (fileName?.toLowerCase().endsWith('.pdf') || mimeType?.includes('pdf')) {
+    await enrichPdfWithVision(item);
+    return;
+  }
+
   // Route text/documents directly through Z.AI coding API (GLM-5)
   if (fileType === 'document' || fileType === 'text') {
     await enrichWithZaiDirect(item);
@@ -530,6 +536,153 @@ async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
 /**
  * Enrich using MCP Vision Server (@z_ai/mcp-server)
  */
+/**
+ * Enrich PDF by rendering pages as images and analyzing each with MCP vision
+ * Then summarize all page summaries into a final summary using GLM-5
+ */
+async function enrichPdfWithVision(item: EnrichmentQueueItem): Promise<void> {
+  const { recordId, attachmentPath, fileName } = item;
+  const tempDir = path.join(os.tmpdir(), `pdf-${Date.now()}-${recordId}`);
+  fs.mkdirSync(tempDir, { recursive: true });
+
+  try {
+    // Render PDF pages as JPEG images using pdftoppm (max 10 pages to limit API usage)
+    console.log(`[pdf] Rendering pages for ${fileName}...`);
+    execSync(
+      `pdftoppm -jpeg -r 150 -l 10 "${attachmentPath}" "${tempDir}/page"`,
+      { timeout: 60000, stdio: 'pipe' }
+    );
+
+    // Find rendered page images
+    const pageFiles = fs.readdirSync(tempDir)
+      .filter(f => f.endsWith('.jpg'))
+      .sort();
+
+    if (pageFiles.length === 0) {
+      console.warn(`[pdf] No pages rendered for ${fileName}, falling back to text`);
+      await enrichWithZaiDirect(item);
+      return;
+    }
+
+    console.log(`[pdf] Rendered ${pageFiles.length} pages for ${fileName}`);
+
+    // Analyze each page with MCP vision
+    const client = getMcpVisionClient();
+    const pageSummaries: string[] = [];
+
+    for (let i = 0; i < pageFiles.length; i++) {
+      const pageFile = path.join(tempDir, pageFiles[i]);
+      const pageNum = i + 1;
+
+      try {
+        // Resize page image if needed
+        const prepared = await prepareImageForMcp(pageFile);
+        try {
+          const prompt = `This is page ${pageNum} of ${pageFiles.length} of a PDF document "${fileName}". Extract ALL text content from this page. Also describe any images, charts, tables, or diagrams.`;
+          const summary = await client.analyzeImage(prepared.path, prompt);
+          if (summary) {
+            pageSummaries.push(`--- Page ${pageNum} ---\n${summary}`);
+          }
+        } finally {
+          prepared.cleanup();
+        }
+      } catch (pageErr: any) {
+        console.warn(`[pdf] Failed to analyze page ${pageNum}: ${pageErr.message}`);
+        pageSummaries.push(`--- Page ${pageNum} ---\n[Analysis failed: ${pageErr.message}]`);
+      }
+    }
+
+    // Combine page summaries into final summary using GLM-5 text API
+    const allPageContent = pageSummaries.join('\n\n');
+    let finalSummary: string;
+    let finalLabels: string[] = ['pdf', 'document'];
+    let ocrText = allPageContent;
+
+    if (pageSummaries.length > 1) {
+      // Ask GLM-5 to create a combined summary
+      try {
+        const combinePrompt = `You are summarizing a ${pageFiles.length}-page PDF document titled "${fileName}". Below are the extracted contents from each page. Please provide:
+
+Title
+(A concise title for this document)
+
+Summary
+(A comprehensive 3-5 sentence summary of the entire document)
+
+Tags
+(Comma-separated relevant tags/labels)
+
+Here are the page contents:
+
+${allPageContent}`;
+
+        const response = await fetch(`${Z_AI_BASE_URL}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${ZAI_TOKEN}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: Z_AI_MODEL,
+            messages: [{ role: 'user', content: combinePrompt }],
+            max_tokens: 2048,
+          }),
+        });
+
+        if (response.ok) {
+          const result = await response.json() as any;
+          const content = result?.choices?.[0]?.message?.content || '';
+          const parsed = parseStructuredSummary(content);
+          finalSummary = parsed.title ? `${parsed.title}: ${parsed.summary}` : parsed.summary;
+          if (parsed.tags.length > 0) finalLabels = [...finalLabels, ...parsed.tags];
+        } else {
+          finalSummary = `PDF Document (${pageFiles.length} pages): ${allPageContent.substring(0, 500)}`;
+        }
+      } catch {
+        finalSummary = `PDF Document (${pageFiles.length} pages): ${allPageContent.substring(0, 500)}`;
+      }
+    } else {
+      // Single page — use page summary directly
+      const parsed = parseStructuredSummary(pageSummaries[0] || '');
+      finalSummary = parsed.title ? `${parsed.title}: ${parsed.summary}` : parsed.summary;
+      if (parsed.tags.length > 0) finalLabels = [...finalLabels, ...parsed.tags];
+    }
+
+    // Truncate OCR text if too long
+    if (ocrText.length > 50000) {
+      ocrText = ocrText.substring(0, 50000) + '\n\n[... truncated ...]';
+    }
+
+    // Save to DB
+    await pool.query(
+      `UPDATE attachments SET 
+        summary_text = $1, labels = $2, ocr_text = $3,
+        summary_model = $4, summary_updated_at = NOW(),
+        metadata = COALESCE(metadata, '{}'::jsonb) || $5::jsonb
+      WHERE record_id = $6 AND is_active = TRUE`,
+      [
+        finalSummary || 'PDF document (no content extracted)',
+        JSON.stringify([...new Set(finalLabels)]),
+        ocrText,
+        Z_AI_MODEL,
+        JSON.stringify({
+          model: 'glm-4v-mcp + ' + Z_AI_MODEL,
+          analyzed_by: 'pdf-vision-pipeline',
+          pages_analyzed: pageFiles.length,
+        }),
+        recordId,
+      ]
+    );
+
+    console.log(`[pdf] Successfully enriched ${fileName} (${pageFiles.length} pages)`);
+  } finally {
+    // Clean up temp directory
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  }
+}
+
 async function enrichWithMcpVision(item: EnrichmentQueueItem): Promise<void> {
   const { recordId, attachmentPath, fileType, fileName } = item;
   let absolutePath = path.resolve(attachmentPath);
