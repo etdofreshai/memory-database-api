@@ -139,4 +139,54 @@ router.get('/:record_id/file', requireAuth('read', 'write', 'admin'), async (req
   }
 });
 
+// PATCH attachment enrichment fields by record_id
+router.patch('/:record_id', requireAuth('write', 'admin'), async (req, res) => {
+  const { record_id } = req.params;
+  const allowedFields = ['summary_text', 'summary_model', 'summary_updated_at', 'labels', 'ocr_text', 'user_notes', 'metadata'];
+  const updates: string[] = [];
+  const params: any[] = [];
+  let idx = 1;
+
+  for (const field of allowedFields) {
+    if (req.body[field] !== undefined) {
+      if (field === 'metadata') {
+        updates.push(`${field} = $${idx++}::jsonb`);
+        params.push(JSON.stringify(req.body[field]));
+      } else {
+        updates.push(`${field} = $${idx++}`);
+        params.push(req.body[field]);
+      }
+    }
+  }
+
+  if (updates.length === 0) {
+    res.status(400).json({ error: 'No valid fields to update' }); return;
+  }
+
+  try {
+    // Check if attachment exists
+    const existing = await pool.query(
+      `SELECT id FROM current_attachments WHERE record_id = $1::uuid LIMIT 1`,
+      [record_id]
+    );
+    if (existing.rows.length === 0) {
+      res.status(404).json({ error: 'Attachment not found' }); return;
+    }
+
+    // Update directly (SCD columns will be handled by triggers if present)
+    const result = await pool.query(
+      `UPDATE attachments SET ${updates.join(', ')} WHERE record_id = $${idx}::uuid AND is_active = true RETURNING record_id`,
+      [...params, record_id]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Update failed' }); return;
+    }
+
+    res.json({ updated: true, record_id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
