@@ -24,7 +24,7 @@
                 │                        │
                 ▼                        ▼
         ┌──────────────────┐    ┌──────────────────┐
-        │  Gemini Queue    │    │  Claude Queue    │
+        │  Z.AI Queue    │    │  Claude Queue    │
         │  (Images, Video, │    │  (Text, Docs)    │
         │   Audio, PDF)    │    │                  │
         └────────┬─────────┘    └────────┬─────────┘
@@ -96,7 +96,7 @@
 │  │  │ Queue Management            │   │                  │
 │  │  │ ┌───────────────────────┐   │   │                  │
 │  │  │ │ Main Queue (FIFO)     │   │   │                  │
-│  │  │ │ - Gemini items        │   │   │                  │
+│  │  │ │ - Z.AI items        │   │   │                  │
 │  │  │ │ - Claude items        │   │   │                  │
 │  │  │ └───────────────────────┘   │   │                  │
 │  │  │ ┌───────────────────────┐   │   │                  │
@@ -107,20 +107,20 @@
 │  │                                    │                  │
 │  │  ┌─────────────────────────────┐   │                  │
 │  │  │ Rate Limiting               │   │                  │
-│  │  │ - Gemini: 60 req/min        │   │                  │
+│  │  │ - Z.AI: 60 req/min        │   │                  │
 │  │  │ - Claude: 30 req/min        │   │                  │
 │  │  │ - Per-minute reset          │   │                  │
 │  │  └─────────────────────────────┘   │                  │
 │  │                                    │                  │
 │  │  ┌─────────────────────────────┐   │                  │
 │  │  │ Concurrency Control         │   │                  │
-│  │  │ - Gemini: 2 workers         │   │                  │
+│  │  │ - Z.AI: 2 workers         │   │                  │
 │  │  │ - Claude: 1 worker          │   │                  │
 │  │  └─────────────────────────────┘   │                  │
 │  │                                    │                  │
 │  │  ┌─────────────────────────────┐   │                  │
 │  │  │ Enrichment Engines          │   │                  │
-│  │  │ - enrichWithGemini()        │   │                  │
+│  │  │ - enrichWithZ.AI()        │   │                  │
 │  │  │ - enrichWithClaude()        │   │                  │
 │  │  │ - storeEnrichmentResults()  │   │                  │
 │  │  └─────────────────────────────┘   │                  │
@@ -137,7 +137,7 @@
 │        ▼                      ▼                          │
 │  ┌──────────────┐    ┌──────────────────────┐           │
 │  │ PostgreSQL   │    │ External APIs        │           │
-│  │ Database     │    │ - Google Gemini      │           │
+│  │ Database     │    │ - Google Z.AI      │           │
 │  │              │    │ - Anthropic Claude   │           │
 │  │ (attachments)│    │                      │           │
 │  └──────────────┘    └──────────────────────┘           │
@@ -202,15 +202,15 @@
 
 4. FILE TYPE DETECTION
    selectEnrichmentType(mimeType, fileType)
-   ├─ image/* → gemini_vision
-   ├─ video/* → gemini_vision
-   ├─ audio/* → gemini_vision
-   ├─ application/pdf → gemini_vision
-   └─ text/* → claude_text (or gemini)
+   ├─ image/* → zai_vision
+   ├─ video/* → zai_vision
+   ├─ audio/* → zai_vision
+   ├─ application/pdf → zai_vision
+   └─ text/* → claude_text (or zai)
 
 5. API CALL (WITH RETRIES)
    For each processing item:
-   ├─ enrichWithGemini() OR enrichWithClaude()
+   ├─ enrichWithZ.AI() OR enrichWithClaude()
    │  ├─ Read file from disk
    │  ├─ Encode to base64
    │  ├─ Call external API
@@ -232,7 +232,7 @@
 6. RESULT STORAGE
    PostgreSQL (attachments table)
    ├─ summary_text: "A scenic mountain landscape..."
-   ├─ summary_model: "gemini-2.0-flash"
+   ├─ summary_model: "zai-2.0-flash"
    ├─ summary_updated_at: "2024-03-07T04:32:15Z"
    ├─ ocr_text: "Summit elevation 12,345 ft"
    ├─ labels: ["landscape", "mountains", "outdoor"]
@@ -279,7 +279,7 @@
 ## Concurrency Model
 
 ```
-Gemini Workers (max 2 concurrent)           Claude Workers (max 1 concurrent)
+Z.AI Workers (max 2 concurrent)           Claude Workers (max 1 concurrent)
 
 Worker 1                    Worker 2         Worker 1
 ├─ Processing image.jpg     ├─ Processing    ├─ Processing
@@ -295,7 +295,7 @@ Queue                       Queue           Queue
 ├─ photo3.jpg              │                └─ (empty)
 └─ ...                      │
 
-Total inflight: 2 Gemini + 1 Claude = 3 concurrent requests
+Total inflight: 2 Z.AI + 1 Claude = 3 concurrent requests
 ```
 
 ## Error Recovery Flow
@@ -389,7 +389,7 @@ attachments table
 │
 ├─ ENRICHMENT FIELDS (populated by system):
 │  ├─ summary_text (VARCHAR, 0-5000 chars)
-│  ├─ summary_model (VARCHAR, e.g., "gemini-2.0-flash")
+│  ├─ summary_model (VARCHAR, e.g., "zai-2.0-flash")
 │  ├─ summary_updated_at (TIMESTAMPTZ)
 │  ├─ ocr_text (TEXT, 0-10,000 chars)
 │  ├─ labels (JSONB array)

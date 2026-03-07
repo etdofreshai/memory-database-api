@@ -3,11 +3,11 @@ import React, { useEffect, useState, useMemo } from 'react';
 interface QueueStatus {
   pending: number;
   processing: {
-    gemini: number;
+    zai: number;
     claude: number;
   };
   rateLimits: {
-    gemini: { used: number; limit: number };
+    zai: { used: number; limit: number };
     claude: { used: number; limit: number };
   };
   deadLetterCount: number;
@@ -118,7 +118,7 @@ export default function Enrichments() {
     setToken(next);
   }
 
-  const totalProcessing = status ? (status.processing.gemini + status.processing.claude) : 0;
+  const totalProcessing = status ? (status.processing.zai + status.processing.claude) : 0;
   const totalPending = status ? status.pending : 0;
 
   return (
@@ -156,7 +156,7 @@ export default function Enrichments() {
             <div>
               <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#888' }}>PROCESSING</p>
               <p style={{ margin: 0, fontSize: 24, fontWeight: 'bold' }}>
-                {totalProcessing} <span style={{ fontSize: 14, color: '#888' }}>({status.processing.gemini} Gemini, {status.processing.claude} Claude)</span>
+                {totalProcessing} <span style={{ fontSize: 14, color: '#888' }}>({status.processing.zai} Z.AI, {status.processing.claude} Claude)</span>
               </p>
             </div>
           </div>
@@ -170,12 +170,12 @@ export default function Enrichments() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <div>
               <p style={{ margin: '0 0 8px 0' }}>
-                <strong>Gemini:</strong> {status.rateLimits.gemini.used} / {status.rateLimits.gemini.limit}
+                <strong>Z.AI:</strong> {status.rateLimits.zai.used} / {status.rateLimits.zai.limit}
               </p>
               <div style={{ width: '100%', background: '#f1f1f1', borderRadius: 4, overflow: 'hidden', height: 12 }}>
                 <div
                   style={{
-                    width: `${Math.min(100, (status.rateLimits.gemini.used / status.rateLimits.gemini.limit) * 100)}%`,
+                    width: `${Math.min(100, (status.rateLimits.zai.used / status.rateLimits.zai.limit) * 100)}%`,
                     background: '#4caf50',
                     height: '100%',
                   }}

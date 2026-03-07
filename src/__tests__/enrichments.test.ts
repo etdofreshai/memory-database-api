@@ -41,7 +41,7 @@ describe('Enrichment System', () => {
       expect.objectContaining({
         pending: expect.any(Number),
         processing: expect.objectContaining({
-          gemini: expect.any(Number),
+          zai: expect.any(Number),
           claude: expect.any(Number),
         }),
         rateLimits: expect.any(Object),
@@ -78,7 +78,7 @@ describe('Enrichment System', () => {
 
   it('should track rate limits', () => {
     const status = getQueueStatus();
-    expect(status.rateLimits.gemini).toEqual(
+    expect(status.rateLimits.zai).toEqual(
       expect.objectContaining({
         used: expect.any(Number),
         limit: expect.any(Number),

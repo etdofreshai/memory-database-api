@@ -4,7 +4,7 @@
 
 A complete, production-ready enrichment system has been implemented for memory-database-api that:
 
-1. **Automatically enriches attachments** (images, videos, audio, documents) using Gemini and Claude APIs
+1. **Automatically enriches attachments** (images, videos, audio, documents) using Z.AI and Claude APIs
 2. **Queues requests asynchronously** to avoid blocking the ingest endpoint
 3. **Implements rate limiting and concurrency control** to respect API quotas
 4. **Includes retry logic with exponential backoff** for resilience
@@ -19,8 +19,8 @@ A complete, production-ready enrichment system has been implemented for memory-d
 
 ```typescript
 // Configuration
-- RATE_LIMITS: { gemini: 60, claude: 30 } requests/minute
-- CONCURRENCY: { gemini: 2, claude: 1 } parallel workers
+- RATE_LIMITS: { zai: 60, claude: 30 } requests/minute
+- CONCURRENCY: { zai: 2, claude: 1 } parallel workers
 - MAX_RETRIES: 3 with exponential backoff (1s → 2s → 4s)
 - Dead letter queue for persistent failures
 
@@ -64,10 +64,10 @@ for (const file of files) {
 
 ### API Integrations
 
-#### Gemini Vision API (`enrichWithGemini`)
+#### Z.AI GLM API (`enrichWithZ.AI`)
 
 Used for **images, videos, audio, PDFs**:
-- Sends base64-encoded file to Gemini
+- Sends base64-encoded file to Z.AI
 - Requests summary, OCR text, labels, and metadata
 - Parses JSON response
 - Stores results in attachment record
@@ -123,8 +123,8 @@ Body: {
 ### Environment Variables
 
 ```bash
-# Required for Gemini enrichment
-GEMINI_API_KEY=<your-api-key>
+# Required for Z.AI enrichment
+Z_AI_TOKEN=<your-api-key>
 
 # Required for Claude enrichment (Claude Sonnet model)
 CLAUDE_CODE_OAUTH_TOKEN=<your-token>
@@ -136,12 +136,12 @@ claude_code_oauth_token=<your-token>
 
 ```typescript
 const RATE_LIMITS = {
-  gemini: 60,  // Requests per minute (adjust per quota)
+  zai: 60,  // Requests per minute (adjust per quota)
   claude: 30,  // Requests per minute (adjust per quota)
 };
 
 const CONCURRENCY = {
-  gemini: 2,   // Parallel workers (increase for more throughput)
+  zai: 2,   // Parallel workers (increase for more throughput)
   claude: 1,   // Parallel workers
 };
 
@@ -241,7 +241,7 @@ interface DeadLetterItem {
 ### Throughput
 
 **Default settings:**
-- ~120 files/hour with Gemini (2 concurrent workers, 60 req/min)
+- ~120 files/hour with Z.AI (2 concurrent workers, 60 req/min)
 - ~30 files/hour with Claude (1 concurrent worker, 30 req/min)
 
 **Optimization tips:**
@@ -260,9 +260,9 @@ No external database needed — all state in-memory. Safe for horizontal scaling
 
 ### Latency
 
-- **Image enrichment:** 2-5 seconds (Gemini)
+- **Image enrichment:** 2-5 seconds (Z.AI)
 - **Document enrichment:** 1-3 seconds (Claude)
-- **Video enrichment:** 5-15 seconds (Gemini processes first frame)
+- **Video enrichment:** 5-15 seconds (Z.AI processes first frame)
 
 Asynchronous processing means ingest is unblocked immediately.
 
@@ -271,11 +271,11 @@ Asynchronous processing means ingest is unblocked immediately.
 ### Logging Output
 
 ```
-[Enrichments] System initialized: { geminiAvailable: true, claudeAvailable: true, ... }
-[gemini] Starting enrichment for 550e8400-... (photo.jpg)
-[gemini] Successfully enriched 550e8400-... in 2345ms
+[Enrichments] System initialized: { zaiAvailable: true, claudeAvailable: true, ... }
+[zai] Starting enrichment for 550e8400-... (photo.jpg)
+[zai] Successfully enriched 550e8400-... in 2345ms
 [claude] Retry scheduled for 550e8400-... (attempt 1/3) in 1000ms
-[gemini] Failed to enrich 550e8400-... after 3 retries: Invalid API key
+[zai] Failed to enrich 550e8400-... after 3 retries: Invalid API key
 ```
 
 ### Key Metrics to Track
@@ -283,7 +283,7 @@ Asynchronous processing means ingest is unblocked immediately.
 1. **Queue depth:** `pending` from `GET /api/enrichments/queue-status`
 2. **Rate limit utilization:** Compare `used` vs `limit`
 3. **Dead letter count:** Indicates persistent failures
-4. **Processing workers:** Monitor `processing.gemini` and `processing.claude`
+4. **Processing workers:** Monitor `processing.zai` and `processing.claude`
 
 ### Recommended Monitoring
 
@@ -294,7 +294,7 @@ curl /api/enrichments/queue-status | jq '{pending, rateLimits, deadLetterCount}'
 # Alert if:
 # - pending > 500 (queue building up)
 # - deadLetterCount > 10 (persistent failures)
-# - rateLimits.gemini.used near limit (approaching quota)
+# - rateLimits.zai.used near limit (approaching quota)
 ```
 
 ## Testing
@@ -331,7 +331,7 @@ curl /api/attachments/<record_id> | jq '.attachment | {summary_text, labels, ocr
 ### New Files
 
 - `src/enrichments.ts` (450 lines)
-  - Core queue system with Gemini/Claude integration
+  - Core queue system with Z.AI/Claude integration
   - Rate limiting and retry logic
   - API integration functions
 
@@ -387,7 +387,7 @@ npm start
 ### Environment Setup
 
 ```bash
-export GEMINI_API_KEY=your-key
+export Z_AI_TOKEN=your-key
 export CLAUDE_CODE_OAUTH_TOKEN=your-token
 export DATABASE_URL=postgresql://...
 npm start
@@ -397,7 +397,7 @@ npm start
 
 ```dockerfile
 # Uses existing Dockerfile
-# Just needs GEMINI_API_KEY and CLAUDE_CODE_OAUTH_TOKEN env vars
+# Just needs Z_AI_TOKEN and CLAUDE_CODE_OAUTH_TOKEN env vars
 ```
 
 ## Future Enhancements
@@ -425,16 +425,16 @@ npm start
 
 ## Cost Estimates
 
-**Assuming Gemini and Claude pricing (as of 2024):**
+**Assuming Z.AI and Claude pricing (as of 2024):**
 
 ```
 1,000 files/month:
-  - Gemini Vision: ~$1-3/month
+  - Z.AI GLM: ~$1-3/month
   - Claude Sonnet: ~$2-5/month
   - Total: ~$3-8/month
 
 10,000 files/month:
-  - Gemini Vision: ~$10-30/month
+  - Z.AI GLM: ~$10-30/month
   - Claude Sonnet: ~$20-50/month
   - Total: ~$30-80/month
 ```
@@ -446,7 +446,7 @@ Adjust concurrency/rate limits based on your budget.
 ### Common Issues
 
 **Queue not processing:**
-- Check env vars: `echo $GEMINI_API_KEY`
+- Check env vars: `echo $Z_AI_TOKEN`
 - Check logs: `docker logs memory-database-api | grep Enrichments`
 - Verify API keys work: test directly with API
 
@@ -471,7 +471,7 @@ Adjust concurrency/rate limits based on your budget.
 The enrichment system provides:
 
 ✅ **Automatic file enrichment** on ingest  
-✅ **Gemini Vision API** for media/documents  
+✅ **Z.AI GLM API** for media/documents  
 ✅ **Claude API** for text analysis  
 ✅ **Asynchronous processing** (non-blocking)  
 ✅ **Rate limiting** and concurrency control  

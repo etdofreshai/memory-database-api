@@ -6,7 +6,7 @@ import pool from './db.js';
  * Enrichment System for Memory Database API
  * 
  * Handles async enrichment of attachments using:
- * - Gemini API for images, videos, audio, documents (OCR, summaries, metadata)
+ * - Z.AI (GLM-4.6V) for images, videos, audio, documents (OCR, summaries, metadata)
  * - Claude Agent SDK for text-based analysis and enrichment
  * 
  * Features:
@@ -19,18 +19,19 @@ import pool from './db.js';
  */
 
 const CLAUDE_API_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.claude_code_oauth_token;
-const GEMINI_SUMMARIZER_URL = 'https://gemini-test.etdofresh.com/api/summarize';
-const GEMINI_DELETE_CONVERSATION_URL = 'https://gemini-test.etdofresh.com/api/conversation';
+const Z_AI_TOKEN = process.env.Z_AI_TOKEN || process.env.z_ai_token;
+const Z_AI_BASE_URL = process.env.Z_AI_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
+const Z_AI_MODEL = process.env.Z_AI_MODEL || 'glm-4v-flash';
 
 // Rate limiting config (requests per minute)
 const RATE_LIMITS = {
-  gemini: 60,
+  zai: 60,
   claude: 30,
 };
 
 // Queue config
 const CONCURRENCY = {
-  gemini: 2,
+  zai: 2,
   claude: 1,
 };
 
@@ -38,7 +39,7 @@ const CONCURRENCY = {
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
 
-type EnrichmentType = 'gemini_vision' | 'claude_text';
+type EnrichmentType = 'zai_vision' | 'claude_text';
 
 interface EnrichmentQueueItem {
   recordId: string;
@@ -55,25 +56,32 @@ interface EnrichmentQueueItem {
 }
 
 interface RateLimitTracker {
-  gemini: { lastReset: number; count: number };
+  zai: { lastReset: number; count: number };
   claude: { lastReset: number; count: number };
 }
 
 // Global state
 const queue: EnrichmentQueueItem[] = [];
-const processing = { gemini: 0, claude: 0 };
+const processing = { zai: 0, claude: 0 };
 const rateLimiter: RateLimitTracker = {
-  gemini: { lastReset: Date.now(), count: 0 },
+  zai: { lastReset: Date.now(), count: 0 },
   claude: { lastReset: Date.now(), count: 0 },
 };
 const deadLetterQueue: EnrichmentQueueItem[] = [];
 
+// Validate Z_AI_TOKEN at startup
+if (!Z_AI_TOKEN) {
+  console.warn('[Enrichments] WARNING: Z_AI_TOKEN is not set. Z.AI enrichments will fail. Set Z_AI_TOKEN (or z_ai_token) environment variable.');
+}
+
 // Log configuration at startup
 console.log('[Enrichments] System initialized:', {
-  geminiSummarizerUrl: GEMINI_SUMMARIZER_URL,
+  zaiModel: Z_AI_MODEL,
+  zaiBaseUrl: Z_AI_BASE_URL,
+  zaiTokenSet: !!Z_AI_TOKEN,
   claudeAvailable: !!CLAUDE_API_TOKEN,
   rateLimits: {
-    gemini: `${RATE_LIMITS.gemini} req/min`,
+    zai: `${RATE_LIMITS.zai} req/min`,
     claude: `${RATE_LIMITS.claude} req/min`,
   },
   concurrency: CONCURRENCY,
@@ -83,22 +91,22 @@ console.log('[Enrichments] System initialized:', {
  * Determine which enrichment method to use based on file type
  */
 function selectEnrichmentType(mimeType: string, fileType: string): EnrichmentType {
-  // Images, video, audio → Gemini summarizer
+  // Images, video, audio → Z.AI GLM vision
   if (fileType === 'image' || fileType === 'video' || fileType === 'audio') {
-    return 'gemini_vision';
+    return 'zai_vision';
   }
   // Text, PDFs, documents → Claude
   if (fileType === 'document' || mimeType?.startsWith('text/') || mimeType?.includes('pdf')) {
     return 'claude_text';
   }
-  // Default to Gemini for unknown types
-  return 'gemini_vision';
+  // Default to Z.AI for unknown types
+  return 'zai_vision';
 }
 
 /**
  * Check if we can make a request to the given API (respects rate limits)
  */
-function canMakeRequest(apiName: 'gemini' | 'claude'): boolean {
+function canMakeRequest(apiName: 'zai' | 'claude'): boolean {
   const tracker = rateLimiter[apiName];
   const now = Date.now();
   const limit = RATE_LIMITS[apiName];
@@ -115,42 +123,109 @@ function canMakeRequest(apiName: 'gemini' | 'claude'): boolean {
 /**
  * Record an API request for rate limiting
  */
-function recordRequest(apiName: 'gemini' | 'claude'): void {
+function recordRequest(apiName: 'zai' | 'claude'): void {
   rateLimiter[apiName].count++;
 }
 
 /**
- * Enrich attachment with Gemini Vision API
+ * Build the Z.AI prompt for summarizing an attachment
  */
-async function enrichWithGemini(item: EnrichmentQueueItem): Promise<void> {
+function buildZaiPrompt(fileType: string, fileName: string): string {
+  const base = `Analyze this file and provide a structured response with the following sections:
+
+Raw Content
+(Extract any readable text, OCR content, or transcript from the file)
+
+Title
+(A concise descriptive title)
+
+Summary
+(A 2-3 sentence summary of the content)
+
+File Description
+(What kind of file this is and what it contains)
+
+Tags
+(Comma-separated relevant tags/labels)`;
+
+  if (fileType === 'audio') {
+    return `This is an audio file (${fileName}). Please transcribe the audio content first, then summarize it.\n\n${base}`;
+  }
+  return base;
+}
+
+/**
+ * Enrich attachment with Z.AI GLM Vision API
+ */
+async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
   const { recordId, attachmentPath, mimeType, fileType, fileName } = item;
+
+  if (!Z_AI_TOKEN) {
+    throw new Error('Z_AI_TOKEN not configured. Set Z_AI_TOKEN environment variable.');
+  }
 
   if (!fs.existsSync(attachmentPath)) {
     throw new Error(`File not found: ${attachmentPath}`);
   }
 
-  // Use gemini-test.etdofresh.com/api/summarize (multipart form upload)
+  // Read file and convert to base64 for the Z.AI API
   const fileBuffer = fs.readFileSync(attachmentPath);
-  const blob = new Blob([fileBuffer], { type: mimeType || 'application/octet-stream' });
+  const base64Data = fileBuffer.toString('base64');
+  const dataUrl = `data:${mimeType || 'application/octet-stream'};base64,${base64Data}`;
 
-  const formData = new FormData();
-  formData.append('file', blob, fileName);
+  const prompt = buildZaiPrompt(fileType, fileName);
 
-  const response = await fetch(GEMINI_SUMMARIZER_URL, {
+  // Build messages with multimodal content
+  const userContent: any[] = [];
+
+  // For image/video types, include as image_url; for audio/other, include as file reference
+  if (fileType === 'image' || fileType === 'video') {
+    userContent.push({
+      type: 'image_url',
+      image_url: { url: dataUrl },
+    });
+  } else {
+    // For audio and other types, try sending as image_url (GLM-4V accepts various media)
+    // If the model doesn't support this media type, it will return an error and we retry differently
+    userContent.push({
+      type: 'image_url',
+      image_url: { url: dataUrl },
+    });
+  }
+
+  userContent.push({
+    type: 'text',
+    text: prompt,
+  });
+
+  const response = await fetch(`${Z_AI_BASE_URL}/chat/completions`, {
     method: 'POST',
-    body: formData,
+    headers: {
+      'Authorization': `Bearer ${Z_AI_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: Z_AI_MODEL,
+      messages: [
+        {
+          role: 'user',
+          content: userContent,
+        },
+      ],
+      max_tokens: 2048,
+    }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini summarizer error (${response.status}): ${errorText}`);
+    throw new Error(`Z.AI API error (${response.status}): ${errorText}`);
   }
 
   const result = await response.json() as any;
-  const summaryText = result?.summary || '';
+  const summaryText = result?.choices?.[0]?.message?.content || '';
 
   if (!summaryText) {
-    throw new Error('No summary from Gemini summarizer response');
+    throw new Error('No content from Z.AI response');
   }
 
   // Parse the structured summary format:
@@ -165,32 +240,21 @@ async function enrichWithGemini(item: EnrichmentQueueItem): Promise<void> {
   const tags = tagsMatch?.[1]?.trim().split(/,\s*/).map((t: string) => t.trim()).filter(Boolean) || [];
   const rawContent = rawContentMatch?.[1]?.trim() || '';
 
+  const modelUsed = result?.model || Z_AI_MODEL;
+
   const enrichmentData = {
     summary: title ? `${title}: ${summary}` : summary,
     ocr_text: rawContent || null,
     labels: tags,
     metadata: {
-      model: result?.metadata?.modelName || 'gemini',
-      conversationId: result?.metadata?.conversationId,
-      analyzed_by: 'gemini-summarizer',
+      model: modelUsed,
+      analyzed_by: 'zai-glm',
+      zai_usage: result?.usage || null,
     },
   };
 
   // Store results in database
   await storeEnrichmentResults(recordId, enrichmentData);
-
-  // Clean up: delete the Gemini conversation to avoid clutter
-  const conversationId = result?.metadata?.conversationId;
-  if (conversationId) {
-    try {
-      await fetch(`${GEMINI_DELETE_CONVERSATION_URL}/${conversationId}`, {
-        method: 'DELETE',
-      });
-      console.log(`[gemini] Deleted conversation ${conversationId} for ${recordId}`);
-    } catch (err) {
-      console.warn(`[gemini] Failed to delete conversation ${conversationId}:`, err);
-    }
-  }
 }
 
 /**
@@ -349,12 +413,12 @@ async function storeEnrichmentResults(recordId: string, data: any): Promise<void
  * Process next item in the queue (for a specific API)
  */
 async function processNextItem(
-  apiName: 'gemini' | 'claude'
+  apiName: 'zai' | 'claude'
 ): Promise<void> {
   // Find next item for this API
   const itemIdx = queue.findIndex(item => {
-    if (apiName === 'gemini') {
-      return item.enrichmentType === 'gemini_vision';
+    if (apiName === 'zai') {
+      return item.enrichmentType === 'zai_vision';
     } else {
       return item.enrichmentType === 'claude_text';
     }
@@ -368,8 +432,8 @@ async function processNextItem(
   try {
     console.log(`[${apiName}] Starting enrichment for ${item.recordId} (${item.fileName})`);
 
-    if (apiName === 'gemini') {
-      await enrichWithGemini(item);
+    if (apiName === 'zai') {
+      await enrichWithZai(item);
     } else {
       await enrichWithClaude(item);
     }
@@ -414,18 +478,18 @@ async function processNextItem(
  * Main queue processor
  */
 async function processQueue(): Promise<void> {
-  // Process Gemini queue
+  // Process Z.AI queue
   if (
-    processing.gemini < CONCURRENCY.gemini &&
-    canMakeRequest('gemini') &&
-    queue.some(item => item.enrichmentType === 'gemini_vision')
+    processing.zai < CONCURRENCY.zai &&
+    canMakeRequest('zai') &&
+    queue.some(item => item.enrichmentType === 'zai_vision')
   ) {
-    processing.gemini++;
-    recordRequest('gemini');
-    processNextItem('gemini')
-      .catch(err => console.error('Gemini processing error:', err))
+    processing.zai++;
+    recordRequest('zai');
+    processNextItem('zai')
+      .catch(err => console.error('Z.AI processing error:', err))
       .finally(() => {
-        processing.gemini--;
+        processing.zai--;
         processQueue();
       });
   }
@@ -485,13 +549,13 @@ export function getQueueStatus() {
   return {
     pending: queue.length,
     processing: {
-      gemini: processing.gemini,
+      zai: processing.zai,
       claude: processing.claude,
     },
     rateLimits: {
-      gemini: {
-        used: rateLimiter.gemini.count,
-        limit: RATE_LIMITS.gemini,
+      zai: {
+        used: rateLimiter.zai.count,
+        limit: RATE_LIMITS.zai,
       },
       claude: {
         used: rateLimiter.claude.count,

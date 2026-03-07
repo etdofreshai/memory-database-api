@@ -5,7 +5,7 @@
 The enrichment system is already integrated! Just set environment variables and restart:
 
 ```bash
-export GEMINI_API_KEY=your-gemini-key
+export Z_AI_TOKEN=your-zai-key
 export CLAUDE_CODE_OAUTH_TOKEN=your-claude-token
 npm start
 ```
@@ -78,7 +78,7 @@ curl -X POST http://localhost:3000/api/enrichments/retry-failed \
 |---------|----------|
 | `pending` stays high | Increase `CONCURRENCY` in `src/enrichments.ts` |
 | Items in dead letter | Check logs for API errors, update keys, retry |
-| "API key missing" | Set `GEMINI_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` |
+| "API key missing" | Set `Z_AI_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` |
 | Rate limit errors | Reduce `RATE_LIMITS` values in `src/enrichments.ts` |
 
 ## File Locations
@@ -98,10 +98,10 @@ ENRICHMENT_QUICK_START.md         ← This file
 
 | Type | Handler | Results |
 |------|---------|---------|
-| Images (JPG, PNG) | Gemini | summary, OCR, labels, objects |
-| Videos (MP4, MOV) | Gemini | summary, metadata |
-| Audio (MP3, WAV) | Gemini | metadata, summary |
-| PDFs | Gemini+Claude | OCR, summary, text |
+| Images (JPG, PNG) | Z.AI | summary, OCR, labels, objects |
+| Videos (MP4, MOV) | Z.AI | summary, metadata |
+| Audio (MP3, WAV) | Z.AI | metadata, summary |
+| PDFs | Z.AI+Claude | OCR, summary, text |
 | Documents (TXT) | Claude | summary, analysis |
 
 ## API Endpoints
@@ -122,13 +122,13 @@ Edit `src/enrichments.ts` to adjust:
 ```typescript
 // Requests per minute
 const RATE_LIMITS = {
-  gemini: 60,   // ← increase for faster processing
+  zai: 60,   // ← increase for faster processing
   claude: 30,
 };
 
 // Parallel workers
 const CONCURRENCY = {
-  gemini: 2,    // ← increase for more throughput
+  zai: 2,    // ← increase for more throughput
   claude: 1,
 };
 ```
@@ -149,9 +149,9 @@ npm start 2>&1 | grep Enrichments
 
 Sample output:
 ```
-[Enrichments] System initialized: { geminiAvailable: true, claudeAvailable: true }
-[gemini] Starting enrichment for 550e8400-... (photo.jpg)
-[gemini] Successfully enriched 550e8400-... in 2345ms
+[Enrichments] System initialized: { zaiAvailable: true, claudeAvailable: true }
+[zai] Starting enrichment for 550e8400-... (photo.jpg)
+[zai] Successfully enriched 550e8400-... in 2345ms
 ```
 
 ## Next Steps

@@ -2,20 +2,20 @@
 
 ## Summary
 
-A production-ready attachment enrichment system has been successfully implemented for memory-database-api. The system automatically enriches uploaded files (images, videos, audio, documents) using Gemini Vision API and Claude, storing summaries, OCR text, labels, and metadata in the database.
+A production-ready attachment enrichment system has been successfully implemented for memory-database-api. The system automatically enriches uploaded files (images, videos, audio, documents) using Z.AI GLM API and Claude, storing summaries, OCR text, labels, and metadata in the database.
 
 ## What Was Implemented
 
 ### Core Components ✅
 
 1. **Enrichment Queue System** (`src/enrichments.ts` - 450 lines)
-   - FIFO queue with per-API concurrency limits (Gemini: 2, Claude: 1)
-   - Rate limiting (Gemini: 60 req/min, Claude: 30 req/min)
+   - FIFO queue with per-API concurrency limits (Z.AI: 2, Claude: 1)
+   - Rate limiting (Z.AI: 60 req/min, Claude: 30 req/min)
    - Exponential backoff retry logic (3 attempts with 1s, 2s, 4s backoff)
    - Dead letter queue for persistent failures
    - Comprehensive logging with timing
 
-2. **Gemini Vision Integration**
+2. **Z.AI GLM Integration**
    - Base64 encoding of files
    - Automatic file type detection
    - Prompt engineering for comprehensive analysis
@@ -99,27 +99,27 @@ PATCH endpoint handles field updates automatically.
 ### Environment Variables
 
 ```bash
-# Required for Gemini enrichment
-export GEMINI_API_KEY="your-gemini-api-key"
+# Required for Z.AI enrichment
+export Z_AI_TOKEN="your-zai-api-key"
 
 # Required for Claude enrichment
 export CLAUDE_CODE_OAUTH_TOKEN="your-claude-token"
 ```
 
 Get keys:
-- Gemini: https://aistudio.google.com/app/apikey
+- Z.AI: https://aistudio.google.com/app/apikey
 - Claude: https://console.anthropic.com
 
 ### Optional Tuning (in `src/enrichments.ts`)
 
 ```typescript
 const RATE_LIMITS = {
-  gemini: 60,    // Increase for higher quotas
+  zai: 60,    // Increase for higher quotas
   claude: 30,    // Adjust per your API tier
 };
 
 const CONCURRENCY = {
-  gemini: 2,     // Parallel workers
+  zai: 2,     // Parallel workers
   claude: 1,     // Parallel workers
 };
 ```
@@ -135,7 +135,7 @@ cd /data/workspace/tmp/memory-database-api
 npm run build
 
 # Start with env vars
-GEMINI_API_KEY=your-key CLAUDE_CODE_OAUTH_TOKEN=your-token npm start
+Z_AI_TOKEN=your-key CLAUDE_CODE_OAUTH_TOKEN=your-token npm start
 ```
 
 ### Test Enrichment
@@ -169,7 +169,7 @@ curl http://localhost:3000/api/attachments/[record_id] \
 
 ### Performance Characteristics
 
-- **Throughput:** ~120 files/hour (Gemini), ~30 files/hour (Claude)
+- **Throughput:** ~120 files/hour (Z.AI), ~30 files/hour (Claude)
 - **Memory:** ~500KB for 1000 queued items
 - **Latency:** 2-5 sec (images), 1-3 sec (text), 5-15 sec (video)
 - **Ingest Impact:** None (fully async)
@@ -184,7 +184,7 @@ curl http://localhost:3000/api/attachments/[record_id] \
 ## Key Features
 
 ✅ **Automatic Enrichment** - On ingest, no manual action needed  
-✅ **Gemini Vision API** - Images, videos, audio, PDFs  
+✅ **Z.AI GLM API** - Images, videos, audio, PDFs  
 ✅ **Claude SDK** - Text documents, analysis  
 ✅ **Rate Limiting** - Respects API quotas  
 ✅ **Retry Logic** - 3 attempts with backoff  
@@ -241,7 +241,7 @@ curl http://localhost:3000/api/attachments/[record_id] \
 
 ## Deployment Checklist
 
-- [ ] Set `GEMINI_API_KEY` environment variable
+- [ ] Set `Z_AI_TOKEN` environment variable
 - [ ] Set `CLAUDE_CODE_OAUTH_TOKEN` environment variable
 - [ ] Run `npm run build` to compile
 - [ ] Start service: `npm start`
@@ -270,7 +270,7 @@ curl http://localhost:3000/api/attachments/[record_id] \
 
 ```
 Core Implementation       ✅ Complete
-Gemini Integration        ✅ Complete
+Z.AI Integration        ✅ Complete
 Claude Integration        ✅ Complete
 HTTP Routes              ✅ Complete
 Ingest Integration       ✅ Complete

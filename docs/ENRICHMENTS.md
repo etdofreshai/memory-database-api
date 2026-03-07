@@ -19,7 +19,7 @@ The enrichment system provides asynchronous, queued processing of attachment fil
    - Dead letter queue for persistent failures
 
 2. **API Integrations**
-   - **Gemini Vision API**: Images, videos, audio, PDFs
+   - **Z.AI GLM API**: Images, videos, audio, PDFs
    - **Claude API**: Text analysis for documents
    - Future: Whisper API for audio transcription
 
@@ -34,8 +34,8 @@ The enrichment system provides asynchronous, queued processing of attachment fil
 ### Environment Variables
 
 ```bash
-# Required for Gemini enrichment
-GEMINI_API_KEY=<your-gemini-api-key>
+# Required for Z.AI enrichment
+Z_AI_TOKEN=<your-zai-api-key>
 
 # Required for Claude enrichment
 CLAUDE_CODE_OAUTH_TOKEN=<your-claude-token>
@@ -47,7 +47,7 @@ claude_code_oauth_token=<your-claude-token>
 
 ```typescript
 const RATE_LIMITS = {
-  gemini: 60,  // requests per minute
+  zai: 60,  // requests per minute
   claude: 30,  // requests per minute
 };
 ```
@@ -56,7 +56,7 @@ const RATE_LIMITS = {
 
 ```typescript
 const CONCURRENCY = {
-  gemini: 2,   // parallel requests
+  zai: 2,   // parallel requests
   claude: 1,   // parallel requests
 };
 ```
@@ -153,11 +153,11 @@ Response:
 {
   "pending": 12,
   "processing": {
-    "gemini": 2,
+    "zai": 2,
     "claude": 0
   },
   "rateLimits": {
-    "gemini": {
+    "zai": {
       "used": 45,
       "limit": 60
     },
@@ -171,7 +171,7 @@ Response:
     {
       "recordId": "550e8400-e29b-41d4-a716-446655440000",
       "fileName": "problematic_image.jpg",
-      "lastError": "Gemini API error (400): Invalid image format",
+      "lastError": "Z.AI API error (400): Invalid image format",
       "retries": 3
     }
   ]
@@ -200,7 +200,7 @@ Enriched attachments get the following fields populated:
 
 ### `summary_text`
 - 2-3 sentence summary of the attachment content
-- Populated by Gemini for media, Claude for documents
+- Populated by Z.AI for media, Claude for documents
 
 ### `ocr_text`
 - All visible text extracted from images/documents
@@ -219,7 +219,7 @@ Enriched attachments get the following fields populated:
 
 ### `summary_model`
 - Records which model performed the enrichment
-- Values: `gemini-2.0-flash`, `claude-3-5-sonnet`, etc.
+- Values: `zai-2.0-flash`, `claude-3-5-sonnet`, etc.
 
 ### `summary_updated_at`
 - ISO 8601 timestamp when enrichment completed
@@ -228,10 +228,10 @@ Enriched attachments get the following fields populated:
 
 | File Type | Handled By | Enrichment Type |
 |-----------|-----------|-----------------|
-| Image (JPEG, PNG, GIF, WebP) | Gemini | OCR, objects, summary |
-| Video (MP4, WebM, MOV) | Gemini | First frame analysis, summary |
-| Audio (MP3, OGG, WAV, M4A) | Gemini | Metadata extraction |
-| PDF | Gemini + Claude | OCR, full-text search |
+| Image (JPEG, PNG, GIF, WebP) | Z.AI | OCR, objects, summary |
+| Video (MP4, WebM, MOV) | Z.AI | First frame analysis, summary |
+| Audio (MP3, OGG, WAV, M4A) | Z.AI | Metadata extraction |
+| PDF | Z.AI + Claude | OCR, full-text search |
 | Documents (TXT, DOC, DOCX) | Claude | Text analysis, summary |
 
 ## Monitoring & Logging
@@ -239,17 +239,17 @@ Enriched attachments get the following fields populated:
 The system logs to stdout:
 
 ```
-[Enrichments] System initialized: { geminiAvailable: true, claudeAvailable: true, ... }
-[gemini] Starting enrichment for 550e8400-e29b-41d4-a716-446655440000 (photo.jpg)
-[gemini] Successfully enriched 550e8400-e29b-41d4-a716-446655440000 in 2345ms
+[Enrichments] System initialized: { zaiAvailable: true, claudeAvailable: true, ... }
+[zai] Starting enrichment for 550e8400-e29b-41d4-a716-446655440000 (photo.jpg)
+[zai] Successfully enriched 550e8400-e29b-41d4-a716-446655440000 in 2345ms
 [claude] Retry scheduled for 550e8400-e29b-41d4-a716-446655440001 (attempt 1/3) in 1000ms
-[gemini] Failed to enrich 550e8400-e29b-41d4-a716-446655440002 after 3 retries: Invalid API key
+[zai] Failed to enrich 550e8400-e29b-41d4-a716-446655440002 after 3 retries: Invalid API key
 ```
 
 ### Key Metrics to Monitor
 
 1. **Queue Length**: `GET /api/enrichments/queue-status` → `pending`
-2. **Rate Limit Usage**: Check `rateLimits.gemini.used` vs `limit`
+2. **Rate Limit Usage**: Check `rateLimits.zai.used` vs `limit`
 3. **Dead Letters**: Items stuck after max retries
 4. **Processing Time**: Log duration indicates API speed
 
@@ -274,15 +274,15 @@ The system logs to stdout:
 # Check what failed
 curl http://localhost:3000/api/enrichments/queue-status
 
-# Fix the issue (e.g., update GEMINI_API_KEY), then:
+# Fix the issue (e.g., update Z_AI_TOKEN), then:
 curl -X POST http://localhost:3000/api/enrichments/retry-failed
 ```
 
 ## Performance Considerations
 
 ### Queue Limits
-- **Default concurrency**: 2 Gemini workers, 1 Claude worker
-- **Rate limits**: 60/min Gemini, 30/min Claude
+- **Default concurrency**: 2 Z.AI workers, 1 Claude worker
+- **Rate limits**: 60/min Z.AI, 30/min Claude
 - **Queue depth**: No hard limit, but monitor for backlog
 
 ### Optimization Tips
@@ -294,9 +294,9 @@ curl -X POST http://localhost:3000/api/enrichments/retry-failed
 
 ### Cost Estimates
 
-Assuming Gemini and Claude pricing:
+Assuming Z.AI and Claude pricing:
 - **1000 attachments/month**:
-  - Gemini: ~$5-10/month
+  - Z.AI: ~$5-10/month
   - Claude: ~$5-10/month
   - Total: ~$10-20/month
 
@@ -339,7 +339,7 @@ tail -f /var/log/memory-database-api.log | grep "Enrichments"
 
 Verify env vars:
 ```bash
-echo $GEMINI_API_KEY
+echo $Z_AI_TOKEN
 echo $CLAUDE_CODE_OAUTH_TOKEN
 ```
 
@@ -359,7 +359,7 @@ echo $CLAUDE_CODE_OAUTH_TOKEN
 
 ### API Key Errors
 
-- **Gemini**: Verify key at [Google AI Studio](https://aistudio.google.com/app/apikey)
+- **Z.AI**: Verify key at [Google AI Studio](https://aistudio.google.com/app/apikey)
 - **Claude**: Check token at [Anthropic Dashboard](https://console.anthropic.com)
 
 ### Memory Usage Growing

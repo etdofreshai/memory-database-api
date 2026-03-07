@@ -44,11 +44,11 @@ curl http://localhost:3000/api/enrichments/queue-status \
 {
   "pending": 5,
   "processing": {
-    "gemini": 1,
+    "zai": 1,
     "claude": 0
   },
   "rateLimits": {
-    "gemini": {
+    "zai": {
       "used": 45,
       "limit": 60
     },
@@ -108,7 +108,7 @@ curl http://localhost:3000/api/enrichments/queue-status \
   {
     "recordId": "550e8400-...",
     "fileName": "corrupted.jpg",
-    "lastError": "Gemini API error (400): Invalid image format",
+    "lastError": "Z.AI API error (400): Invalid image format",
     "retries": 3
   }
 ]
@@ -142,7 +142,7 @@ curl "http://localhost:3000/api/attachments/550e8400-e29b-41d4-a716-446655440000
     "file_type": "image",
     "size_bytes": 245000,
     "summary_text": "A sunny outdoor photo showing a person standing in front of mountains with blue sky. Shot during daytime.",
-    "summary_model": "gemini-2.0-flash",
+    "summary_model": "zai-2.0-flash",
     "summary_updated_at": "2024-03-07T04:32:15Z",
     "ocr_text": "Some visible text from the image if any...",
     "labels": [
@@ -235,11 +235,11 @@ watch -n 5 'curl -s http://localhost:3000/api/enrichments/queue-status \
 {
   "pending": 12,
   "processing": {
-    "gemini": 2,
+    "zai": 2,
     "claude": 0
   },
   "rateLimits": {
-    "gemini": {
+    "zai": {
       "used": 50,
       "limit": 60
     },
@@ -258,23 +258,23 @@ Edit `src/enrichments.ts` to customize for your API quotas:
 ```typescript
 // For high-volume processing:
 const RATE_LIMITS = {
-  gemini: 120,  // increased from 60
+  zai: 120,  // increased from 60
   claude: 60,   // increased from 30
 };
 
 const CONCURRENCY = {
-  gemini: 4,    // increased from 2
+  zai: 4,    // increased from 2
   claude: 2,    // increased from 1
 };
 
 // For conservative/free-tier accounts:
 const RATE_LIMITS = {
-  gemini: 15,   // reduced from 60
+  zai: 15,   // reduced from 60
   claude: 5,    // reduced from 30
 };
 
 const CONCURRENCY = {
-  gemini: 1,    // reduced from 2
+  zai: 1,    // reduced from 2
   claude: 1,    // keep at 1
 };
 ```
@@ -295,7 +295,7 @@ curl http://localhost:3000/api/enrichments/queue-status -H "Authorization: Beare
 
 # Output shows it's being processed:
 {
-  "gemini": 1,  # Currently processing
+  "zai": 1,  # Currently processing
   "claude": 0
 }
 
@@ -371,7 +371,7 @@ Retry all failed items from the dead letter queue.
 
 1. Verify API keys are set:
    ```bash
-   echo $GEMINI_API_KEY
+   echo $Z_AI_TOKEN
    echo $CLAUDE_CODE_OAUTH_TOKEN
    ```
 
@@ -408,12 +408,12 @@ If you see many 429 (rate limit) errors:
 
 1. Reduce concurrency in `src/enrichments.ts`:
    ```typescript
-   const CONCURRENCY = { gemini: 1, claude: 1 };
+   const CONCURRENCY = { zai: 1, claude: 1 };
    ```
 
 2. Reduce rate limits:
    ```typescript
-   const RATE_LIMITS = { gemini: 30, claude: 15 };
+   const RATE_LIMITS = { zai: 30, claude: 15 };
    ```
 
 3. Rebuild and restart

@@ -58,7 +58,7 @@ src/
 ```
 
 ### Configuration
-- **Environment variables:** `GEMINI_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`
+- **Environment variables:** `Z_AI_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`
 - **Tuning parameters:** Edit `src/enrichments.ts` RATE_LIMITS and CONCURRENCY
 
 ### Documentation Structure
@@ -215,7 +215,7 @@ Root directory:
 | Component | Status | Documentation |
 |-----------|--------|-----------------|
 | Core Queue System | ✅ Complete | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) |
-| Gemini Integration | ✅ Complete | [docs/ENRICHMENTS.md](./docs/ENRICHMENTS.md) |
+| Z.AI Integration | ✅ Complete | [docs/ENRICHMENTS.md](./docs/ENRICHMENTS.md) |
 | Claude Integration | ✅ Complete | [docs/ENRICHMENTS.md](./docs/ENRICHMENTS.md) |
 | Rate Limiting | ✅ Complete | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) |
 | Retry Logic | ✅ Complete | [ENRICHMENT_IMPLEMENTATION.md](./ENRICHMENT_IMPLEMENTATION.md) |
@@ -231,7 +231,7 @@ Root directory:
 
 ### Environment Setup
 ```bash
-export GEMINI_API_KEY=your-key
+export Z_AI_TOKEN=your-key
 export CLAUDE_CODE_OAUTH_TOKEN=your-token
 npm run build && npm start
 ```
@@ -246,13 +246,13 @@ POST /api/enrichments/retry-failed
 
 ### Configuration
 Edit `src/enrichments.ts`:
-- `RATE_LIMITS.gemini` - Requests per minute
-- `CONCURRENCY.gemini` - Parallel workers
+- `RATE_LIMITS.zai` - Requests per minute
+- `CONCURRENCY.zai` - Parallel workers
 - `MAX_RETRIES` - Retry attempts
 - `INITIAL_BACKOFF_MS` - Retry backoff timing
 
 ### Performance
-- **Throughput:** 120 files/hour (Gemini), 30 files/hour (Claude)
+- **Throughput:** 120 files/hour (Z.AI), 30 files/hour (Claude)
 - **Latency:** 2-5 sec (images), 1-3 sec (text), 5-15 sec (video)
 - **Memory:** ~500KB for 1000 queued items
 

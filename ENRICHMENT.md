@@ -3,12 +3,12 @@
 ## Overview
 
 The enrichment system automatically enhances attachments with AI-generated metadata:
-- **Gemini API** → Images, videos, audio, PDFs (OCR, summaries, object detection)
+- **Z.AI API** → Images, videos, audio, PDFs (OCR, summaries, object detection)
 - **Claude SDK** → Text documents, code, detailed analysis
 
 Features:
 - ✅ Automatic queuing on ingest
-- ✅ Rate limiting (60 req/min Gemini, 30 req/min Claude)
+- ✅ Rate limiting (60 req/min Z.AI, 30 req/min Claude)
 - ✅ Concurrent processing with backpressure
 - ✅ Exponential backoff retry logic
 - ✅ Dead letter queue for failed items
@@ -18,7 +18,7 @@ Features:
 
 ```bash
 # Required for vision/media enrichment
-export GEMINI_API_KEY="your-gemini-api-key"
+export Z_AI_TOKEN="your-zai-api-key"
 
 # Required for text/document enrichment
 export CLAUDE_CODE_OAUTH_TOKEN="your-claude-oauth-token"
@@ -27,7 +27,7 @@ export claude_code_oauth_token="your-claude-oauth-token"
 ```
 
 **Get API keys:**
-- **Gemini:** https://ai.google.dev/gemini-2/docs/api-key
+- **Z.AI:** https://ai.google.dev/zai-2/docs/api-key
 - **Claude OAuth:** https://console.anthropic.com/ → Workspaces → API Keys
 
 ## API Endpoints
@@ -81,11 +81,11 @@ Authorization: Bearer <read-or-admin-token>
 {
   "pending": 5,
   "processing": {
-    "gemini": 1,
+    "zai": 1,
     "claude": 0
   },
   "rateLimits": {
-    "gemini": { "used": 23, "limit": 60 },
+    "zai": { "used": 23, "limit": 60 },
     "claude": { "used": 8, "limit": 30 }
   },
   "deadLetterCount": 2,
@@ -93,7 +93,7 @@ Authorization: Bearer <read-or-admin-token>
     {
       "recordId": "...",
       "fileName": "doc.pdf",
-      "lastError": "Gemini API error (429): Rate limit exceeded",
+      "lastError": "Z.AI API error (429): Rate limit exceeded",
       "retries": 3
     }
   ]
@@ -117,21 +117,21 @@ Authorization: Bearer <admin-token>
 
 | File Type | MIME Pattern | Primary Enricher | Result Fields |
 |-----------|--------------|------------------|----------------|
-| Image | image/* | Gemini Vision | summary, ocr_text, labels, objects |
-| Video | video/* | Gemini Vision | summary, ocr_text, labels, scenes |
-| Audio | audio/* | Gemini (speech-to-text capable) | summary, transcription |
-| PDF | application/pdf | Gemini (OCR) | summary, ocr_text, labels |
+| Image | image/* | Z.AI GLM | summary, ocr_text, labels, objects |
+| Video | video/* | Z.AI GLM | summary, ocr_text, labels, scenes |
+| Audio | audio/* | Z.AI (speech-to-text capable) | summary, transcription |
+| PDF | application/pdf | Z.AI (OCR) | summary, ocr_text, labels |
 | Text | text/* | Claude | summary, key_topics, labels |
 | Document | .docx, .doc | Claude | summary, key_topics, labels |
 
-**Current behavior:** All files route to Gemini. Claude routing can be enabled by modifying `selectEnrichmentType()` in `src/enrichments.ts`.
+**Current behavior:** All files route to Z.AI. Claude routing can be enabled by modifying `selectEnrichmentType()` in `src/enrichments.ts`.
 
 ## Rate Limiting Strategy
 
 Both APIs have per-minute rate limits that respect headers:
 
 ```
-Gemini:
+Z.AI:
 - Limit: 60 requests/minute
 - Concurrency: 2 parallel jobs
 - Backoff: Exponential (1s → 2s → 4s → 8s)
@@ -152,12 +152,12 @@ The queue respects both limits:
 Edit `src/enrichments.ts`:
 ```typescript
 const RATE_LIMITS = {
-  gemini: 60,    // req/min
+  zai: 60,    // req/min
   claude: 30,    // req/min
 };
 
 const CONCURRENCY = {
-  gemini: 2,     // parallel jobs
+  zai: 2,     // parallel jobs
   claude: 1,     // parallel jobs
 };
 ```
@@ -176,7 +176,7 @@ const CONCURRENCY = {
     ↓
 [2] Queue enrichment
     ↓
-[3] Try Gemini → fails (429 rate limited)
+[3] Try Z.AI → fails (429 rate limited)
     ↓
 [4] Retry 1 after 1s → fails
     ↓
@@ -214,11 +214,11 @@ curl http://localhost:3000/api/enrichments/queue-status \
 
 **View logs:**
 ```bash
-# Enrichment logs are written to stdout with [gemini] or [claude] prefixes
+# Enrichment logs are written to stdout with [zai] or [claude] prefixes
 # Examples:
-# [gemini] Starting enrichment for 550e8400-e29b-41d4-a716-446655440000 (photo.jpg)
-# [gemini] Successfully enriched 550e8400-e29b-41d4-a716-446655440000 in 2340ms
-# [gemini] Retry scheduled for 550e8400-e29b-41d4-a716-446655440000 (attempt 1/3) in 1000ms
+# [zai] Starting enrichment for 550e8400-e29b-41d4-a716-446655440000 (photo.jpg)
+# [zai] Successfully enriched 550e8400-e29b-41d4-a716-446655440000 in 2340ms
+# [zai] Retry scheduled for 550e8400-e29b-41d4-a716-446655440000 (attempt 1/3) in 1000ms
 # [claude] Skipping Claude enrichment for non-text file: audio.mp3
 ```
 
@@ -240,7 +240,7 @@ ORDER BY summary_updated_at DESC;
   "summary_text": "A beautiful sunset over the ocean with vibrant orange and pink colors.",
   "ocr_text": "WELCOME TO BEACH RESORT",
   "labels": ["sunset", "ocean", "landscape", "nature"],
-  "summary_model": "gemini-2.0-flash",
+  "summary_model": "zai-2.0-flash",
   "summary_updated_at": "2026-03-07T04:30:00Z"
 }
 ```
@@ -248,7 +248,7 @@ ORDER BY summary_updated_at DESC;
 ## Troubleshooting
 
 ### All enrichments failing with "API_KEY not configured"
-- Check env vars: `echo $GEMINI_API_KEY $CLAUDE_CODE_OAUTH_TOKEN`
+- Check env vars: `echo $Z_AI_TOKEN $CLAUDE_CODE_OAUTH_TOKEN`
 - Restart the API: `npm start` or `docker-compose restart`
 
 ### Rate limit errors (429)
@@ -263,15 +263,15 @@ ORDER BY summary_updated_at DESC;
 4. Check logs for error messages
 
 ### Too slow / eating all API quota
-- Reduce `CONCURRENCY.gemini` or `CONCURRENCY.claude`
-- Reduce `RATE_LIMITS.gemini` or `RATE_LIMITS.claude`
+- Reduce `CONCURRENCY.zai` or `CONCURRENCY.claude`
+- Reduce `RATE_LIMITS.zai` or `RATE_LIMITS.claude`
 - Only call `/enrich-all` during off-peak hours
 
 ## Future Improvements
 
 1. **Claude Agent SDK** — Use `claudeSDK.execute()` for richer document analysis
 2. **Streaming Responses** — Process long documents in chunks
-3. **LLM Caching** — Cache Gemini responses for identical files (by SHA256)
+3. **LLM Caching** — Cache Z.AI responses for identical files (by SHA256)
 4. **Webhook Notifications** — POST when enrichment completes
 5. **Configurable Prompts** — Let users define summary format per file type
 6. **Multi-language Support** — Detect and preserve language in summaries

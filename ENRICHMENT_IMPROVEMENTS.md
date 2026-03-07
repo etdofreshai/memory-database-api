@@ -3,14 +3,14 @@
 ## Current State
 
 ✅ **Working:**
-- Gemini API integration for all file types
+- Z.AI API integration for all file types
 - Rate limiting + queue management
 - Exponential backoff retry logic
 - Dead letter queue
 - Auto-enrichment on ingest
 
 ❌ **Gaps:**
-- Claude routing not optimized (documents still go to Gemini)
+- Claude routing not optimized (documents still go to Z.AI)
 - Claude SDK (agent execution) not implemented
 - No streaming responses for long documents
 - Basic JSON parsing from LLM responses (fragile)
@@ -19,14 +19,14 @@
 
 ### 1. Separate Claude for Text-Based Enrichment
 
-**Current:** All files → Gemini
+**Current:** All files → Z.AI
 
 **Better:** Route by file type:
 ```typescript
 function selectEnrichmentType(mimeType: string, fileType: string): EnrichmentType {
-  // Vision/media → Gemini
+  // Vision/media → Z.AI
   if (['image', 'video', 'audio'].includes(fileType)) {
-    return 'gemini_vision';
+    return 'zai_vision';
   }
   
   // PDFs with lots of text → Claude (better for dense documents)
@@ -40,7 +40,7 @@ function selectEnrichmentType(mimeType: string, fileType: string): EnrichmentTyp
   }
   
   // Fallback
-  return 'gemini_vision';
+  return 'zai_vision';
 }
 ```
 
@@ -167,10 +167,10 @@ async function enrichWithClaudeStreaming(item: EnrichmentQueueItem): Promise<voi
 Both APIs return rate limit info in response headers:
 
 ```typescript
-async function enrichWithGemini(item: EnrichmentQueueItem): Promise<void> {
+async function enrichWithZ.AI(item: EnrichmentQueueItem): Promise<void> {
   // ... existing code ...
   
-  const response = await fetch(`${GEMINI_BASE_URL}/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+  const response = await fetch(`${Z_AI_BASE_URL}/zai-2.0-flash:generateContent?key=${Z_AI_TOKEN}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(requestBody),
@@ -181,16 +181,16 @@ async function enrichWithGemini(item: EnrichmentQueueItem): Promise<void> {
   const resetTime = response.headers.get('x-ratelimit-reset-requests');
   
   if (remainingRequests) {
-    console.log(`[gemini] Remaining requests: ${remainingRequests}`);
+    console.log(`[zai] Remaining requests: ${remainingRequests}`);
     if (parseInt(remainingRequests) < 5) {
-      console.warn('[gemini] Approaching rate limit, pausing...');
+      console.warn('[zai] Approaching rate limit, pausing...');
       // Slow down queue processing
     }
   }
   
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini API error (${response.status}): ${errorText}`);
+    throw new Error(`Z.AI API error (${response.status}): ${errorText}`);
   }
   
   // ... rest of code ...
@@ -208,7 +208,7 @@ const ERRORS = {
   PARSE_ERROR: 'parse_error',
 };
 
-async function enrichWithGemini(item: EnrichmentQueueItem): Promise<void> {
+async function enrichWithZ.AI(item: EnrichmentQueueItem): Promise<void> {
   try {
     // ... existing code ...
   } catch (err: any) {
@@ -305,7 +305,7 @@ await notifyWebhook(item.recordId, 'success', enrichmentData);
 - [ ] Add webhook notifications (optional)
 - [ ] Add integration tests with mock APIs
 - [ ] Update documentation with new capabilities
-- [ ] Test with real Gemini + Claude keys
+- [ ] Test with real Z.AI + Claude keys
 
 ## Testing the Improvements
 
@@ -328,7 +328,7 @@ watch 'curl -s http://localhost:3000/api/enrichments/queue-status -H "Authorizat
 
 ```bash
 # .env.test
-GEMINI_API_KEY="AIzaSyDxx..."
+Z_AI_TOKEN="AIzaSyDxx..."
 CLAUDE_CODE_OAUTH_TOKEN="sk-ant-xxx..."
 NODE_ENV="test"
 ```

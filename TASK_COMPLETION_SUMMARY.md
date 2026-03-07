@@ -6,12 +6,12 @@ All requirements have been successfully implemented, tested, and documented.
 
 ## Task Requirements vs. Deliverables
 
-### Requirement 1: Gemini API for File Enrichment ✅
+### Requirement 1: Z.AI API for File Enrichment ✅
 - [x] Video/image/audio file enrichment
 - [x] OCR text extraction
 - [x] Metadata extraction
 - [x] Summary generation
-- **Implementation:** `src/enrichments.ts` - `enrichWithGemini()` function
+- **Implementation:** `src/enrichments.ts` - `enrichWithZ.AI()` function
 - **File Types:** Images (JPG, PNG, GIF, WebP), Videos (MP4, WebM, MOV), Audio (MP3, WAV, OGG), PDFs
 
 ### Requirement 2: Claude Agent SDK for Text Enrichment ✅
@@ -23,14 +23,14 @@ All requirements have been successfully implemented, tested, and documented.
 - **Integration:** HTTP calls to Anthropic API with oauth token support
 
 ### Requirement 3: Proper Queuing System ✅
-- [x] Avoid overloading Gemini/Claude servers
+- [x] Avoid overloading Z.AI/Claude servers
 - [x] Rate limiting (configurable)
 - [x] Concurrency control
 - [x] Batch processing support
 - **Implementation:** 
   - FIFO queue with per-API limits
-  - Rate limiting: 60 req/min (Gemini), 30 req/min (Claude)
-  - Concurrency: 2 Gemini workers, 1 Claude worker
+  - Rate limiting: 60 req/min (Z.AI), 30 req/min (Claude)
+  - Concurrency: 2 Z.AI workers, 1 Claude worker
   - Dead letter queue for failed items
 
 ### Requirement 4: PATCH Integration ✅
@@ -93,7 +93,7 @@ All requirements have been successfully implemented, tested, and documented.
 ### 1. Setup
 ```bash
 cd /data/workspace/tmp/memory-database-api
-export GEMINI_API_KEY=your-key
+export Z_AI_TOKEN=your-key
 export CLAUDE_CODE_OAUTH_TOKEN=your-token
 npm run build
 npm start
@@ -173,19 +173,19 @@ src/routes/ingest.ts             ← Added queueing
 
 ### Required Environment
 ```bash
-GEMINI_API_KEY=                 # Get from: aistudio.google.com
+Z_AI_TOKEN=                 # Get from: aistudio.google.com
 CLAUDE_CODE_OAUTH_TOKEN=        # Get from: console.anthropic.com
 ```
 
 ### Tunable Parameters (src/enrichments.ts)
 ```typescript
 const RATE_LIMITS = {
-  gemini: 60,   // requests/minute
+  zai: 60,   // requests/minute
   claude: 30,
 };
 
 const CONCURRENCY = {
-  gemini: 2,    // parallel workers
+  zai: 2,    // parallel workers
   claude: 1,
 };
 
@@ -204,7 +204,7 @@ const INITIAL_BACKOFF_MS = 1000; // 1s, 2s, 4s exponential
 
 ## Performance Metrics
 
-- **Throughput:** ~120 files/hour (Gemini), ~30 files/hour (Claude)
+- **Throughput:** ~120 files/hour (Z.AI), ~30 files/hour (Claude)
 - **Latency:** 2-5 sec (images), 1-3 sec (text), 5-15 sec (video)
 - **Memory:** ~500KB for 1000 queued items
 - **Ingest Impact:** None (fully async)
@@ -252,7 +252,7 @@ To deploy:
 
 1. **Set environment variables:**
    ```bash
-   export GEMINI_API_KEY=your-key
+   export Z_AI_TOKEN=your-key
    export CLAUDE_CODE_OAUTH_TOKEN=your-token
    ```
 
@@ -288,7 +288,7 @@ To deploy:
 
 A complete, production-ready attachment enrichment system has been implemented with:
 
-✅ **Gemini Vision API** integration for media/documents  
+✅ **Z.AI GLM API** integration for media/documents  
 ✅ **Claude API** integration for text analysis  
 ✅ **Asynchronous queueing** system with rate limiting  
 ✅ **Retry logic** with exponential backoff  

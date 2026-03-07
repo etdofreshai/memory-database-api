@@ -5,11 +5,11 @@
 The memory-database-api **already has a fully functional enrichment system** with:
 
 ### Core Features
-- ✅ **Gemini Integration** — Vision API for images, videos, audio, PDFs
+- ✅ **Z.AI Integration** — Vision API for images, videos, audio, PDFs
 - ✅ **Claude Support** — Basic Anthropic API for text documents (using standard messages endpoint)
 - ✅ **Auto-Enrichment** — Automatically queued when attachments are ingested
-- ✅ **Queue Management** — Sequential processing with concurrent limits (2 for Gemini, 1 for Claude)
-- ✅ **Rate Limiting** — Per-minute limits (60 for Gemini, 30 for Claude)
+- ✅ **Queue Management** — Sequential processing with concurrent limits (2 for Z.AI, 1 for Claude)
+- ✅ **Rate Limiting** — Per-minute limits (60 for Z.AI, 30 for Claude)
 - ✅ **Retry Logic** — Exponential backoff (1s → 2s → 4s) up to 3 retries
 - ✅ **Dead Letter Queue** — Failed items preserved for manual retry
 - ✅ **HTTP API** — 4 endpoints for monitoring & manual control
@@ -22,7 +22,7 @@ src/
 └── app.ts                  # Routes mounted
 
 Database:
-- attachments.summary_text    (Gemini/Claude results)
+- attachments.summary_text    (Z.AI/Claude results)
 - attachments.ocr_text        (Extracted text)
 - attachments.labels          (JSON array of tags)
 - attachments.metadata        (JSON with enrichment metadata)
@@ -32,9 +32,9 @@ Database:
 
 ## 📋 Current Implementation Details
 
-### Gemini Vision (All Media Types)
+### Z.AI GLM (All Media Types)
 ```typescript
-// Images, videos, audio, PDFs → Gemini
+// Images, videos, audio, PDFs → Z.AI
 // Sends base64-encoded file + prompt
 // Returns: summary, ocr_text, labels, metadata
 ```
@@ -48,7 +48,7 @@ Database:
 
 ### Rate Limiting
 ```
-Gemini:  60 req/min (2 concurrent)
+Z.AI:  60 req/min (2 concurrent)
 Claude:  30 req/min (1 concurrent)
 
 Per-minute reset + concurrency check before each request
@@ -57,7 +57,7 @@ Per-minute reset + concurrency check before each request
 ### Environment Variables
 ```bash
 # Required
-GEMINI_API_KEY="AIzaSyD..."
+Z_AI_TOKEN="AIzaSyD..."
 CLAUDE_CODE_OAUTH_TOKEN="sk-ant-..." # or claude_code_oauth_token
 
 # Optional
@@ -98,9 +98,9 @@ curl http://localhost:3000/api/enrichments/queue-status \
 # Returns:
 {
   "pending": 5,
-  "processing": { "gemini": 1, "claude": 0 },
+  "processing": { "zai": 1, "claude": 0 },
   "rateLimits": {
-    "gemini": { "used": 23, "limit": 60 },
+    "zai": { "used": 23, "limit": 60 },
     "claude": { "used": 8, "limit": 30 }
   },
   "deadLetterCount": 0,
@@ -121,15 +121,15 @@ curl -X POST http://localhost:3000/api/enrichments/retry-failed \
 cd /data/workspace/tmp/memory-database-api
 
 # Set env vars
-export GEMINI_API_KEY="your-key"
+export Z_AI_TOKEN="your-key"
 export CLAUDE_CODE_OAUTH_TOKEN="your-key"
 
 # Start
 npm run dev
 # ✅ Logs will show enrichment activity:
-# [Enrichments] System initialized: { geminiAvailable: true, claudeAvailable: true ... }
-# [gemini] Starting enrichment for 550e8400-... (photo.jpg)
-# [gemini] Successfully enriched 550e8400-... in 2340ms
+# [Enrichments] System initialized: { zaiAvailable: true, claudeAvailable: true ... }
+# [zai] Starting enrichment for 550e8400-... (photo.jpg)
+# [zai] Successfully enriched 550e8400-... in 2340ms
 ```
 
 ### Production (Docker)
@@ -138,7 +138,7 @@ FROM node:20-alpine
 WORKDIR /app
 COPY . .
 RUN npm ci
-ENV GEMINI_API_KEY=xxx
+ENV Z_AI_TOKEN=xxx
 ENV CLAUDE_CODE_OAUTH_TOKEN=xxx
 CMD ["npm", "start"]
 ```
@@ -146,15 +146,15 @@ CMD ["npm", "start"]
 ## ⚠️ Known Limitations & Next Steps
 
 ### Current Gaps
-1. **Claude Routing** — Documents still go to Gemini (works fine, but less optimal)
+1. **Claude Routing** — Documents still go to Z.AI (works fine, but less optimal)
 2. **Claude Agent SDK** — Using basic API, not full agent execution capabilities
 3. **No Streaming** — Large documents wait for full response
 4. **Basic JSON Parsing** — Fragile regex-based parsing from LLM outputs
 5. **No Webhooks** — Can't notify external systems when enrichment completes
 
 ### Recommended Next Steps (Priority Order)
-1. **Test with Real API Keys** — Verify both Gemini and Claude work end-to-end
-2. **Separate Claude Routing** — Route text files to Claude, media to Gemini
+1. **Test with Real API Keys** — Verify both Z.AI and Claude work end-to-end
+2. **Separate Claude Routing** — Route text files to Claude, media to Z.AI
 3. **Upgrade Claude to Agent SDK** — Use `@anthropic-ai/sdk` for richer analysis
 4. **Add Streaming** — For long documents (PDFs, contracts)
 5. **Better Error Handling** — Categorize errors (rate limit vs. invalid file)
@@ -171,8 +171,8 @@ CMD ["npm", "start"]
 | Audio (MP3, <50MB) | 5-20s | ~3¢ | transcript, summary |
 | Text (doc, <100KB) | 1-3s | <1¢ | summary, topics, labels |
 
-**Rate limits:** 60 Gemini/min = 1 req/sec, 30 Claude/min = 0.5 req/sec
-**Processing:** With 2 Gemini workers, can handle ~2 image requests/sec sustained
+**Rate limits:** 60 Z.AI/min = 1 req/sec, 30 Claude/min = 0.5 req/sec
+**Processing:** With 2 Z.AI workers, can handle ~2 image requests/sec sustained
 
 ## 🔗 Related Files
 
@@ -184,7 +184,7 @@ CMD ["npm", "start"]
 
 ## 🎯 Quick Start Checklist
 
-- [ ] Set `GEMINI_API_KEY` env var
+- [ ] Set `Z_AI_TOKEN` env var
 - [ ] Set `CLAUDE_CODE_OAUTH_TOKEN` env var
 - [ ] Run `npm start`
 - [ ] Test: POST to `/api/messages/ingest` with a file
@@ -205,8 +205,8 @@ curl -X POST http://localhost:3000/api/messages/ingest \
 
 # 2. Enrichment is already queued in background
 # Watch logs:
-#   [gemini] Starting enrichment for 550e8400-... (sunset.jpg)
-#   [gemini] Successfully enriched 550e8400-... in 2340ms
+#   [zai] Starting enrichment for 550e8400-... (sunset.jpg)
+#   [zai] Successfully enriched 550e8400-... in 2340ms
 
 # 3. Check results
 curl http://localhost:3000/api/attachments/550e8400-... \
@@ -224,7 +224,7 @@ psql -c "SELECT original_file_name, summary_text, labels
 ## 📞 Support
 
 - **Test it:** `npm test` (requires test env)
-- **Debug logs:** Watch stdout for `[gemini]` and `[claude]` prefixes
+- **Debug logs:** Watch stdout for `[zai]` and `[claude]` prefixes
 - **Queue issues:** GET `/api/enrichments/queue-status` for detailed status
 - **API errors:** Check response body for specific error messages
 - **Rate limited:** Items auto-retry with backoff, check dead letter queue if stuck
