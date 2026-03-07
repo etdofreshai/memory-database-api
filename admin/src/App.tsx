@@ -28,6 +28,28 @@ function AdminPanel() {
   const [newSources, setNewSources] = useState('');
   const [createdToken, setCreatedToken] = useState('');
   const [error, setError] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+  const [geminiStatus, setGeminiStatus] = useState<string | null>(null);
+  const [enrichQueueStatus, setEnrichQueueStatus] = useState<any>(null);
+
+  async function checkGeminiStatus() {
+    try {
+      const res = await fetch('https://gemini-test.etdofresh.com/api/status');
+      const data = await res.json();
+      setGeminiStatus(data.authenticated ? 'authenticated' : 'not authenticated');
+    } catch { setGeminiStatus('unreachable'); }
+  }
+
+  async function checkEnrichQueue() {
+    if (!adminToken) return;
+    try {
+      const res = await fetch(`${BASE}/api/enrichments/queue-status`, { headers: headers() });
+      if (res.ok) {
+        const data = await res.json();
+        setEnrichQueueStatus({ pending: data.pending, processing: data.processing, deadLetterCount: data.deadLetterCount, rateLimits: data.rateLimits });
+      }
+    } catch {}
+  }
 
   const headers = () => ({ 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' });
 
@@ -97,10 +119,52 @@ function AdminPanel() {
   return (
     <div style={{ fontFamily: 'system-ui', maxWidth: 800, margin: '2rem auto', padding: '0 1rem' }}>
       <h1>🧠 Memory API Admin</h1>
-      <div style={{ marginBottom: 12, display: 'flex', gap: 12 }}>
+      <div style={{ marginBottom: 12, display: 'flex', gap: 12, alignItems: 'center' }}>
         <a href={`${BASE}/admin/viewer`}>Open Viewer →</a>
         <a href={`${BASE}/admin/embeddings`}>Open Embeddings →</a>
+        <button onClick={() => { setShowSettings(!showSettings); if (!showSettings) { checkGeminiStatus(); checkEnrichQueue(); } }}
+          style={{ marginLeft: 'auto', background: 'none', border: '1px solid #555', borderRadius: 4, padding: '4px 10px', cursor: 'pointer' }}>
+          ⚙️ Settings
+        </button>
       </div>
+
+      {showSettings && (
+        <div style={{ background: '#1a1a2e', border: '1px solid #444', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+          <h3 style={{ marginTop: 0 }}>Settings</h3>
+
+          <div style={{ marginBottom: 12 }}>
+            <strong>Gemini Summarizer</strong>
+            <span style={{ marginLeft: 8, color: geminiStatus === 'authenticated' ? '#4caf50' : '#ff6b6b' }}>
+              {geminiStatus === null ? '...' : geminiStatus === 'authenticated' ? '● Connected' : `● ${geminiStatus}`}
+            </span>
+            <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+              <a href="https://gemini-test.etdofresh.com" target="_blank" rel="noopener noreferrer">
+                <button style={{ cursor: 'pointer' }}>Open Gemini Test</button>
+              </a>
+              <a href="https://gemini-test.etdofresh.com/login" target="_blank" rel="noopener noreferrer">
+                <button style={{ cursor: 'pointer' }}>🔑 Login with Google</button>
+              </a>
+              <button onClick={checkGeminiStatus} style={{ cursor: 'pointer' }}>🔄 Refresh Status</button>
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <strong>Enrichment Queue</strong>
+            <button onClick={checkEnrichQueue} style={{ marginLeft: 8, cursor: 'pointer', fontSize: 12 }}>🔄</button>
+            {enrichQueueStatus && (
+              <div style={{ marginTop: 4, fontSize: 13, fontFamily: 'monospace' }}>
+                Pending: {enrichQueueStatus.pending} | Processing: Gemini {enrichQueueStatus.processing.gemini}, Claude {enrichQueueStatus.processing.claude} | Dead letters: {enrichQueueStatus.deadLetterCount} | Rate: Gemini {enrichQueueStatus.rateLimits.gemini.used}/{enrichQueueStatus.rateLimits.gemini.limit}, Claude {enrichQueueStatus.rateLimits.claude.used}/{enrichQueueStatus.rateLimits.claude.limit}
+              </div>
+            )}
+            <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+              <button onClick={async () => {
+                const res = await fetch(`${BASE}/api/enrichments/retry-failed`, { method: 'POST', headers: headers() });
+                if (res.ok) { const d = await res.json(); alert(`Retried ${d.retried} items`); checkEnrichQueue(); }
+              }} style={{ cursor: 'pointer' }}>🔁 Retry Failed</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{ marginBottom: '1rem' }}>
         <input placeholder="Admin token" type="password" value={adminToken} onChange={e => setAdminToken(e.target.value)} style={{ width: 400, marginRight: 8 }} />
         <button onClick={saveToken}>Connect</button>
