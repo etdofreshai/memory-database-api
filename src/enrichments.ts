@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { execSync } from 'child_process';
 import pool from './db.js';
 import sharp from 'sharp';
 import convert from 'heic-convert';
@@ -8,6 +9,9 @@ import { getMcpVisionClient, shutdownMcpVisionClient } from './mcp-vision-client
 import { parsePluginPayloadAttachment } from './plugin-payload-parser.js';
 
 // Max image size for MCP vision server (5MB)
+// Max video size for MCP vision server (8MB)
+const MAX_VIDEO_SIZE_MB = 8;
+const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
 const MAX_IMAGE_SIZE_MB = 5;
 const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
 
@@ -96,6 +100,55 @@ async function convertGifIfNeeded(filePath: string): Promise<{ path: string; cle
   } catch (err: any) {
     console.error(`[convert] GIF conversion failed: ${err.message}`);
     throw new Error(`Failed to convert GIF to JPEG: ${err.message}`);
+  }
+}
+
+/**
+ * Compress video if it exceeds max size (8MB) using ffmpeg
+ */
+async function compressVideoIfNeeded(filePath: string): Promise<{ path: string; cleanup?: () => void }> {
+  const stats = fs.statSync(filePath);
+  
+  if (stats.size <= MAX_VIDEO_SIZE_BYTES) {
+    return { path: filePath };
+  }
+  
+  console.log(`[compress] Video too large (${(stats.size / 1024 / 1024).toFixed(2)}MB), compressing to fit ${MAX_VIDEO_SIZE_MB}MB...`);
+  
+  const tempDir = os.tmpdir();
+  const tempPath = path.join(tempDir, `compressed-${Date.now()}-${path.basename(filePath, path.extname(filePath))}.mp4`);
+  
+  try {
+    // Target bitrate: aim for ~7MB to leave headroom
+    const targetBytes = MAX_VIDEO_SIZE_BYTES * 0.85;
+    // Get video duration
+    const durationStr = execSync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`,
+      { encoding: 'utf-8', timeout: 30000 }
+    ).trim();
+    const duration = parseFloat(durationStr) || 10;
+    const targetBitrate = Math.floor((targetBytes * 8) / duration / 1000); // kbps
+    
+    // Compress with ffmpeg: reduce resolution to 720p max, limit bitrate
+    execSync(
+      `ffmpeg -i "${filePath}" -vf "scale='min(720,iw)':'min(720,ih)':force_original_aspect_ratio=decrease" -c:v libx264 -b:v ${targetBitrate}k -maxrate ${targetBitrate * 2}k -bufsize ${targetBitrate * 4}k -preset fast -an -y "${tempPath}"`,
+      { timeout: 120000, stdio: 'pipe' }
+    );
+    
+    const newStats = fs.statSync(tempPath);
+    console.log(`[compress] Compressed to ${(newStats.size / 1024 / 1024).toFixed(2)}MB (bitrate: ${targetBitrate}kbps, duration: ${duration.toFixed(1)}s)`);
+    
+    return {
+      path: tempPath,
+      cleanup: () => {
+        try { fs.unlinkSync(tempPath); } catch {}
+      }
+    };
+  } catch (err: any) {
+    // Clean up temp file on error
+    try { fs.unlinkSync(tempPath); } catch {}
+    console.error(`[compress] Video compression failed: ${err.message}`);
+    throw new Error(`Failed to compress video: ${err.message}`);
   }
 }
 
@@ -499,6 +552,11 @@ async function enrichWithMcpVision(item: EnrichmentQueueItem): Promise<void> {
 
   try {
     if (fileType === 'video') {
+      // Compress video if too large for MCP
+      const compressed = await compressVideoIfNeeded(absolutePath);
+      absolutePath = compressed.path;
+      if (compressed.cleanup) cleanup = compressed.cleanup;
+      
       summaryText = await client.analyzeVideo(absolutePath, prompt);
     } else {
       // Prepare image: convert HEIC if needed, then resize if too large

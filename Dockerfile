@@ -18,6 +18,7 @@ RUN cd admin && npm run build
 COPY migrations/ migrations/
 
 FROM node:22-alpine
+RUN apk add --no-cache ffmpeg
 WORKDIR /app
 
 COPY --from=builder /app/package.json ./
