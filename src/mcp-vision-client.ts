@@ -150,12 +150,13 @@ export class McpVisionClient extends EventEmitter {
     const schema = tool?.inputSchema?.properties || {};
 
     // Common parameter names for image path
-    if ('image_path' in schema) args.image_path = filePath;
+    if ('image_source' in schema) args.image_source = filePath;
+    else if ('image_path' in schema) args.image_path = filePath;
     else if ('file_path' in schema) args.file_path = filePath;
     else if ('path' in schema) args.path = filePath;
     else if ('image' in schema) args.image = filePath;
     else if ('url' in schema) args.url = filePath;
-    else args.image_path = filePath; // default
+    else args.image_source = filePath; // default for z.ai MCP server
 
     if (prompt) {
       if ('prompt' in schema) args.prompt = prompt;
