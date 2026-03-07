@@ -3,11 +3,60 @@ import path from 'path';
 import os from 'os';
 import pool from './db.js';
 import sharp from 'sharp';
+import convert from 'heic-convert';
 import { getMcpVisionClient, shutdownMcpVisionClient } from './mcp-vision-client.js';
 
 // Max image size for MCP vision server (5MB)
 const MAX_IMAGE_SIZE_MB = 5;
 const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
+
+/**
+ * Convert HEIC/HEIF to JPEG if needed
+ * Returns path to use (either original or converted temp file)
+ */
+async function convertHeicIfNeeded(filePath: string): Promise<{ path: string; cleanup?: () => void }> {
+  const ext = path.extname(filePath).toLowerCase();
+  
+  if (ext !== '.heic' && ext !== '.heif') {
+    return { path: filePath };
+  }
+  
+  console.log(`[convert] Converting HEIC to JPEG: ${path.basename(filePath)}`);
+  
+  try {
+    // Read HEIC file
+    const inputBuffer = fs.readFileSync(filePath);
+    
+    // Convert to JPEG
+    const outputBuffer = await convert({
+      buffer: inputBuffer,
+      format: 'JPEG',
+      quality: 0.9
+    });
+    
+    // Save to temp file
+    const tempDir = os.tmpdir();
+    const baseName = path.basename(filePath, ext);
+    const tempPath = path.join(tempDir, `converted-${Date.now()}-${baseName}.jpg`);
+    
+    fs.writeFileSync(tempPath, Buffer.from(outputBuffer));
+    
+    const newStats = fs.statSync(tempPath);
+    console.log(`[convert] Converted to JPEG (${(newStats.size / 1024 / 1024).toFixed(2)}MB)`);
+    
+    return {
+      path: tempPath,
+      cleanup: () => {
+        try {
+          fs.unlinkSync(tempPath);
+        } catch {}
+      }
+    };
+  } catch (err: any) {
+    console.error(`[convert] HEIC conversion failed: ${err.message}`);
+    throw new Error(`Failed to convert HEIC to JPEG: ${err.message}`);
+  }
+}
 
 /**
  * Resize image if it exceeds max size
@@ -35,7 +84,7 @@ async function resizeImageIfNeeded(filePath: string): Promise<{ path: string; cl
   
   // Resize and save to temp
   const tempDir = os.tmpdir();
-  const tempPath = path.join(tempDir, `resized-${Date.now()}-${path.basename(filePath)}`);
+  const tempPath = path.join(tempDir, `resized-${Date.now()}-${path.basename(filePath, path.extname(filePath))}.jpg`);
   
   await sharp(filePath)
     .resize(newWidth, newHeight, { fit: 'inside', withoutEnlargement: true })
@@ -51,6 +100,31 @@ async function resizeImageIfNeeded(filePath: string): Promise<{ path: string; cl
       try {
         fs.unlinkSync(tempPath);
       } catch {}
+    }
+  };
+}
+
+/**
+ * Prepare image for MCP vision: convert HEIC if needed, then resize if needed
+ */
+async function prepareImageForMcp(filePath: string): Promise<{ path: string; cleanup: () => void }> {
+  const cleanups: (() => void)[] = [];
+  let currentPath = filePath;
+  
+  // Step 1: Convert HEIC to JPEG if needed
+  const converted = await convertHeicIfNeeded(currentPath);
+  currentPath = converted.path;
+  if (converted.cleanup) cleanups.push(converted.cleanup);
+  
+  // Step 2: Resize if too large
+  const resized = await resizeImageIfNeeded(currentPath);
+  currentPath = resized.path;
+  if (resized.cleanup) cleanups.push(resized.cleanup);
+  
+  return {
+    path: currentPath,
+    cleanup: () => {
+      for (const fn of cleanups) fn();
     }
   };
 }
@@ -263,10 +337,10 @@ async function enrichWithMcpVision(item: EnrichmentQueueItem): Promise<void> {
     if (fileType === 'video') {
       summaryText = await client.analyzeVideo(absolutePath, prompt);
     } else {
-      // Resize image if needed before sending to MCP
-      const resized = await resizeImageIfNeeded(absolutePath);
-      absolutePath = resized.path;
-      cleanup = resized.cleanup;
+      // Prepare image: convert HEIC if needed, then resize if too large
+      const prepared = await prepareImageForMcp(absolutePath);
+      absolutePath = prepared.path;
+      cleanup = prepared.cleanup;
       
       summaryText = await client.analyzeImage(absolutePath, prompt);
     }
