@@ -1,7 +1,59 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import pool from './db.js';
+import sharp from 'sharp';
 import { getMcpVisionClient, shutdownMcpVisionClient } from './mcp-vision-client.js';
+
+// Max image size for MCP vision server (5MB)
+const MAX_IMAGE_SIZE_MB = 5;
+const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
+
+/**
+ * Resize image if it exceeds max size
+ * Returns path to use (either original or resized temp file)
+ */
+async function resizeImageIfNeeded(filePath: string): Promise<{ path: string; cleanup?: () => void }> {
+  const stats = fs.statSync(filePath);
+  
+  if (stats.size <= MAX_IMAGE_SIZE_BYTES) {
+    return { path: filePath };
+  }
+  
+  console.log(`[resize] Image too large (${(stats.size / 1024 / 1024).toFixed(2)}MB), resizing to fit ${MAX_IMAGE_SIZE_MB}MB...`);
+  
+  // Calculate scale factor needed
+  const targetSize = MAX_IMAGE_SIZE_BYTES * 0.9; // 90% of max to be safe
+  const scaleFactor = Math.sqrt(targetSize / stats.size);
+  
+  // Get image dimensions
+  const image = sharp(filePath);
+  const metadata = await image.metadata();
+  
+  const newWidth = Math.round((metadata.width || 1000) * scaleFactor);
+  const newHeight = Math.round((metadata.height || 1000) * scaleFactor);
+  
+  // Resize and save to temp
+  const tempDir = os.tmpdir();
+  const tempPath = path.join(tempDir, `resized-${Date.now()}-${path.basename(filePath)}`);
+  
+  await sharp(filePath)
+    .resize(newWidth, newHeight, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 85 }) // Convert to JPEG for better compression
+    .toFile(tempPath);
+  
+  const newStats = fs.statSync(tempPath);
+  console.log(`[resize] Resized to ${(newStats.size / 1024 / 1024).toFixed(2)}MB (${newWidth}x${newHeight})`);
+  
+  return {
+    path: tempPath,
+    cleanup: () => {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {}
+    }
+  };
+}
 
 /**
  * Enrichment System for Memory Database API
@@ -199,36 +251,49 @@ async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
  */
 async function enrichWithMcpVision(item: EnrichmentQueueItem): Promise<void> {
   const { recordId, attachmentPath, fileType, fileName } = item;
-  const absolutePath = path.resolve(attachmentPath);
+  let absolutePath = path.resolve(attachmentPath);
+  let cleanup: (() => void) | undefined;
 
   const prompt = buildZaiPrompt(fileType, fileName);
   const client = getMcpVisionClient();
 
   let summaryText: string;
 
-  if (fileType === 'video') {
-    summaryText = await client.analyzeVideo(absolutePath, prompt);
-  } else {
-    summaryText = await client.analyzeImage(absolutePath, prompt);
+  try {
+    if (fileType === 'video') {
+      summaryText = await client.analyzeVideo(absolutePath, prompt);
+    } else {
+      // Resize image if needed before sending to MCP
+      const resized = await resizeImageIfNeeded(absolutePath);
+      absolutePath = resized.path;
+      cleanup = resized.cleanup;
+      
+      summaryText = await client.analyzeImage(absolutePath, prompt);
+    }
+
+    if (!summaryText) {
+      throw new Error('No content from MCP vision response');
+    }
+
+    const parsed = parseStructuredSummary(summaryText);
+
+    const enrichmentData = {
+      summary: parsed.title ? `${parsed.title}: ${parsed.summary}` : parsed.summary,
+      ocr_text: parsed.rawContent || null,
+      labels: parsed.tags,
+      metadata: {
+        model: 'glm-4v-mcp',
+        analyzed_by: 'zai-mcp-vision',
+      },
+    };
+
+    await storeEnrichmentResults(recordId, enrichmentData);
+  } finally {
+    // Cleanup temp resized file if created
+    if (cleanup) {
+      cleanup();
+    }
   }
-
-  if (!summaryText) {
-    throw new Error('No content from MCP vision response');
-  }
-
-  const parsed = parseStructuredSummary(summaryText);
-
-  const enrichmentData = {
-    summary: parsed.title ? `${parsed.title}: ${parsed.summary}` : parsed.summary,
-    ocr_text: parsed.rawContent || null,
-    labels: parsed.tags,
-    metadata: {
-      model: 'glm-4v-mcp',
-      analyzed_by: 'zai-mcp-vision',
-    },
-  };
-
-  await storeEnrichmentResults(recordId, enrichmentData);
 }
 
 /**
