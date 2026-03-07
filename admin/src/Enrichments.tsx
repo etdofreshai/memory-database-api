@@ -5,11 +5,9 @@ interface QueueStatus {
   pending: number;
   processing: {
     zai: number;
-    claude: number;
   };
   rateLimits: {
     zai: { used: number; limit: number };
-    claude: { used: number; limit: number };
   };
   deadLetterCount: number;
   deadLetterQueue: Array<{
@@ -173,7 +171,7 @@ export default function Enrichments() {
     setToken(next);
   }
 
-  const totalProcessing = status ? (status.processing.zai + status.processing.claude) : 0;
+  const totalProcessing = status ? status.processing.zai : 0;
   const totalActive = (status?.pending || 0) + totalProcessing;
 
   return (
@@ -220,7 +218,7 @@ export default function Enrichments() {
             <div>
               <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#888' }}>PROCESSING</p>
               <p style={{ margin: 0, fontSize: 24, fontWeight: 'bold' }}>
-                {totalProcessing} <span style={{ fontSize: 14, color: '#888' }}>({status.processing.zai} Z.AI, {status.processing.claude} Claude)</span>
+                {totalProcessing} <span style={{ fontSize: 14, color: '#888' }}>(Z.AI: {status.processing.zai})</span>
               </p>
             </div>
             <div>
@@ -238,10 +236,10 @@ export default function Enrichments() {
         <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 14, marginBottom: 16 }}>
           <h2 style={{ marginTop: 0 }}>⏱️ Rate Limits (per minute)</h2>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            {(['zai', 'claude'] as const).map(api => (
+            {(['zai'] as const).map(api => (
               <div key={api}>
                 <p style={{ margin: '0 0 8px 0' }}>
-                  <strong>{api === 'zai' ? 'Z.AI' : 'Claude'}:</strong> {status.rateLimits[api].used} / {status.rateLimits[api].limit}
+                  <strong>Z.AI:</strong> {status.rateLimits[api].used} / {status.rateLimits[api].limit}
                 </p>
                 <div style={{ width: '100%', background: '#f1f1f1', borderRadius: 4, overflow: 'hidden', height: 12 }}>
                   <div style={{
