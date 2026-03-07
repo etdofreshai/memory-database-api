@@ -147,7 +147,24 @@ async function resizeImageIfNeeded(filePath: string): Promise<{ path: string; cl
 /**
  * Prepare image for MCP vision: convert HEIC if needed, then resize if needed
  */
+// File types we can't process — skip gracefully
+const SKIP_EXTENSIONS = new Set([
+  '.pluginpayloadattachment', // iMessage link preview cards (binary plist, not media)
+  '.caf',   // Core Audio Format (unsupported by MCP)
+  '.amr',   // Adaptive Multi-Rate audio
+  '.oga',   // Ogg audio
+  '.webm',  // WebM (if not supported)
+]);
+
 async function prepareImageForMcp(filePath: string): Promise<{ path: string; cleanup: () => void }> {
+  const ext = path.extname(filePath).toLowerCase();
+  
+  if (SKIP_EXTENSIONS.has(ext)) {
+    const noRetry = new Error(`Skipped: ${ext} files are not analyzable media (e.g. iMessage link preview)`);
+    (noRetry as any).noRetry = true;
+    throw noRetry;
+  }
+  
   const cleanups: (() => void)[] = [];
   let currentPath = filePath;
   
