@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import pool from './db.js';
+import { getMcpVisionClient, shutdownMcpVisionClient } from './mcp-vision-client.js';
 
 /**
  * Enrichment System for Memory Database API
@@ -159,7 +160,10 @@ Tags
 }
 
 /**
- * Enrich attachment with Z.AI GLM Vision API
+ * Enrich attachment with Z.AI GLM Vision via MCP Server
+ * 
+ * For images/video: uses @z_ai/mcp-server (MCP protocol over stdio)
+ * For text enrichment via Z.AI coding endpoint: uses direct API
  */
 async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
   const { recordId, attachmentPath, mimeType, fileType, fileName } = item;
@@ -172,35 +176,76 @@ async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
     throw new Error(`File not found: ${attachmentPath}`);
   }
 
-  // Read file and convert to base64 for the Z.AI API
+  // For images and video, use MCP Vision Server
+  if (fileType === 'image' || fileType === 'video') {
+    await enrichWithMcpVision(item);
+    return;
+  }
+
+  // For audio and other media types, try MCP first, fall back to direct API
+  try {
+    await enrichWithMcpVision(item);
+    return;
+  } catch (mcpErr: any) {
+    console.warn(`[MCP] Failed for ${fileName}, falling back to direct API: ${mcpErr.message}`);
+  }
+
+  // Fallback: direct Z.AI coding API for non-vision content
+  await enrichWithZaiDirect(item);
+}
+
+/**
+ * Enrich using MCP Vision Server (@z_ai/mcp-server)
+ */
+async function enrichWithMcpVision(item: EnrichmentQueueItem): Promise<void> {
+  const { recordId, attachmentPath, fileType, fileName } = item;
+  const absolutePath = path.resolve(attachmentPath);
+
+  const prompt = buildZaiPrompt(fileType, fileName);
+  const client = getMcpVisionClient();
+
+  let summaryText: string;
+
+  if (fileType === 'video') {
+    summaryText = await client.analyzeVideo(absolutePath, prompt);
+  } else {
+    summaryText = await client.analyzeImage(absolutePath, prompt);
+  }
+
+  if (!summaryText) {
+    throw new Error('No content from MCP vision response');
+  }
+
+  const parsed = parseStructuredSummary(summaryText);
+
+  const enrichmentData = {
+    summary: parsed.title ? `${parsed.title}: ${parsed.summary}` : parsed.summary,
+    ocr_text: parsed.rawContent || null,
+    labels: parsed.tags,
+    metadata: {
+      model: 'glm-4v-mcp',
+      analyzed_by: 'zai-mcp-vision',
+    },
+  };
+
+  await storeEnrichmentResults(recordId, enrichmentData);
+}
+
+/**
+ * Direct Z.AI coding API fallback (for non-vision content)
+ */
+async function enrichWithZaiDirect(item: EnrichmentQueueItem): Promise<void> {
+  const { recordId, attachmentPath, mimeType, fileType, fileName } = item;
+
   const fileBuffer = fs.readFileSync(attachmentPath);
   const base64Data = fileBuffer.toString('base64');
   const dataUrl = `data:${mimeType || 'application/octet-stream'};base64,${base64Data}`;
-
   const prompt = buildZaiPrompt(fileType, fileName);
 
-  // Build messages with multimodal content
-  const userContent: any[] = [];
-
-  // For image/video types, include as image_url; for audio/other, include as file reference
-  if (fileType === 'image' || fileType === 'video') {
-    userContent.push({
-      type: 'image_url',
-      image_url: { url: dataUrl },
-    });
-  } else {
-    // For audio and other types, try sending as image_url (GLM-4V accepts various media)
-    // If the model doesn't support this media type, it will return an error and we retry differently
-    userContent.push({
-      type: 'image_url',
-      image_url: { url: dataUrl },
-    });
-  }
-
-  userContent.push({
-    type: 'text',
-    text: prompt,
-  });
+  const userContent: any[] = [
+    { type: 'image_url', image_url: { url: dataUrl } },
+    { type: 'text', text: prompt },
+  ];
 
   const response = await fetch(`${Z_AI_BASE_URL}/chat/completions`, {
     method: 'POST',
@@ -210,75 +255,70 @@ async function enrichWithZai(item: EnrichmentQueueItem): Promise<void> {
     },
     body: JSON.stringify({
       model: Z_AI_MODEL,
-      messages: [
-        {
-          role: 'user',
-          content: userContent,
-        },
-      ],
+      messages: [{ role: 'user', content: userContent }],
       max_tokens: 2048,
     }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    // Check for non-retryable errors (balance, auth, model not found)
     try {
       const errJson = JSON.parse(errorText);
       const code = errJson?.error?.code;
       if (code === 1113) {
-        // Insufficient balance - don't retry, fail immediately
         const noRetry = new Error(`Z.AI balance exhausted (code 1113): ${errJson?.error?.message}`);
         (noRetry as any).noRetry = true;
         throw noRetry;
       }
       if (code === 1211) {
-        // Model doesn't exist - don't retry
         const noRetry = new Error(`Z.AI model not found (code 1211): ${errJson?.error?.message}`);
         (noRetry as any).noRetry = true;
         throw noRetry;
       }
     } catch (parseErr: any) {
       if (parseErr.noRetry) throw parseErr;
-      // Continue with generic error if parsing failed
     }
     throw new Error(`Z.AI API error (${response.status}): ${errorText}`);
   }
 
   const result = await response.json() as any;
   const summaryText = result?.choices?.[0]?.message?.content || '';
+  if (!summaryText) throw new Error('No content from Z.AI response');
 
-  if (!summaryText) {
-    throw new Error('No content from Z.AI response');
-  }
-
-  // Parse the structured summary format:
-  // Raw Content, Title, Summary, File Description, Tags
-  const titleMatch = summaryText.match(/Title\n(.+)/);
-  const summaryMatch = summaryText.match(/Summary\n([\s\S]*?)(?:\n\n(?:File Description|Tags)|$)/);
-  const tagsMatch = summaryText.match(/Tags\n(.+)/);
-  const rawContentMatch = summaryText.match(/Raw Content\n([\s\S]*?)(?:\n\nTitle|$)/);
-
-  const title = titleMatch?.[1]?.trim() || '';
-  const summary = summaryMatch?.[1]?.trim() || summaryText.substring(0, 500);
-  const tags = tagsMatch?.[1]?.trim().split(/,\s*/).map((t: string) => t.trim()).filter(Boolean) || [];
-  const rawContent = rawContentMatch?.[1]?.trim() || '';
-
+  const parsed = parseStructuredSummary(summaryText);
   const modelUsed = result?.model || Z_AI_MODEL;
 
   const enrichmentData = {
-    summary: title ? `${title}: ${summary}` : summary,
-    ocr_text: rawContent || null,
-    labels: tags,
+    summary: parsed.title ? `${parsed.title}: ${parsed.summary}` : parsed.summary,
+    ocr_text: parsed.rawContent || null,
+    labels: parsed.tags,
     metadata: {
       model: modelUsed,
-      analyzed_by: 'zai-glm',
+      analyzed_by: 'zai-glm-direct',
       zai_usage: result?.usage || null,
     },
   };
 
-  // Store results in database
   await storeEnrichmentResults(recordId, enrichmentData);
+}
+
+/**
+ * Parse structured summary format from AI response
+ */
+function parseStructuredSummary(text: string): {
+  title: string; summary: string; tags: string[]; rawContent: string;
+} {
+  const titleMatch = text.match(/Title\n(.+)/);
+  const summaryMatch = text.match(/Summary\n([\s\S]*?)(?:\n\n(?:File Description|Tags)|$)/);
+  const tagsMatch = text.match(/Tags\n(.+)/);
+  const rawContentMatch = text.match(/Raw Content\n([\s\S]*?)(?:\n\nTitle|$)/);
+
+  return {
+    title: titleMatch?.[1]?.trim() || '',
+    summary: summaryMatch?.[1]?.trim() || text.substring(0, 500),
+    tags: tagsMatch?.[1]?.trim().split(/,\s*/).map((t: string) => t.trim()).filter(Boolean) || [],
+    rawContent: rawContentMatch?.[1]?.trim() || '',
+  };
 }
 
 /**
@@ -648,4 +688,11 @@ export function cancelPending(): number {
  */
 export function isPaused(): boolean {
   return paused;
+}
+
+/**
+ * Shutdown MCP vision server (call on app shutdown)
+ */
+export function shutdownEnrichments(): void {
+  shutdownMcpVisionClient();
 }
