@@ -371,6 +371,7 @@ interface RateLimitTracker {
 
 // Global state
 const queue: EnrichmentQueueItem[] = [];
+const activeRecordIds = new Set<string>(); // Dedup: prevent same attachment being processed concurrently
 const processing = { zai: 0 };
 const rateLimiter: RateLimitTracker = {
   zai: { lastReset: Date.now(), count: 0 },
@@ -973,6 +974,7 @@ async function processNextItem(
     // Success
     const duration = Date.now() - startTime;
     queue.splice(itemIdx, 1);
+    activeRecordIds.delete(item.recordId);
     recordSuccess();
     console.log(
       `[${apiName}] Successfully enriched ${item.recordId} in ${duration}ms (concurrency: ${adaptiveState.current})`
@@ -1009,6 +1011,7 @@ async function processNextItem(
         `[${apiName}] Failed to enrich ${item.recordId} after ${MAX_RETRIES} retries (${duration}ms): ${error.message}`
       );
       queue.splice(itemIdx, 1);
+      activeRecordIds.delete(item.recordId);
       deadLetterQueue.push(item);
       item.reject(error);
     }
@@ -1049,6 +1052,14 @@ export function queueEnrichment(
   fileName: string
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    // Dedup: skip if already queued or being processed
+    if (activeRecordIds.has(recordId)) {
+      console.log(`[dedup] Skipping ${recordId} (${fileName}) — already in queue/processing`);
+      resolve();
+      return;
+    }
+    activeRecordIds.add(recordId);
+
     const enrichmentType = selectEnrichmentType(mimeType, fileType);
 
     const item: EnrichmentQueueItem = {
@@ -1142,6 +1153,7 @@ export function resumeQueue(): void {
 export function cancelPending(): number {
   const count = queue.length;
   for (const item of queue) {
+    activeRecordIds.delete(item.recordId);
     item.reject(new Error('Cancelled'));
   }
   queue.length = 0;
