@@ -218,11 +218,43 @@ router.post('/resume', requireAuth('write', 'admin'), async (_req, res) => {
 
 /**
  * POST /api/enrichments/cancel-pending
- * Cancel all pending (not in-flight) items
+ * Cancel pending (not in-flight) items.
+ * Optional body: { recordIds: string[] } to cancel specific jobs only.
  */
-router.post('/cancel-pending', requireAuth('admin'), async (_req, res) => {
-  const cancelled = cancelPending();
-  res.json({ cancelled, message: `${cancelled} pending items cancelled.` });
+router.post('/cancel-pending', requireAuth('admin'), async (req, res) => {
+  const recordIds = Array.isArray(req.body?.recordIds)
+    ? req.body.recordIds.map((id: any) => String(id)).filter(Boolean)
+    : undefined;
+
+  const cancelled = cancelPending(recordIds);
+  res.json({
+    cancelled,
+    scope: recordIds?.length ? 'selected' : 'all',
+    message: recordIds?.length
+      ? `${cancelled} selected pending items cancelled.`
+      : `${cancelled} pending items cancelled.`,
+  });
+});
+
+/**
+ * POST /api/enrichments/cancel-pending/:record_id
+ * Cancel a single pending queue item by record_id
+ */
+router.post('/cancel-pending/:record_id', requireAuth('admin'), async (req, res) => {
+  const recordId = String(req.params.record_id || '').trim();
+  if (!recordId) {
+    res.status(400).json({ error: 'record_id is required' });
+    return;
+  }
+
+  const cancelled = cancelPending([recordId]);
+  res.json({
+    cancelled,
+    recordId,
+    message: cancelled > 0
+      ? `Pending item ${recordId} cancelled.`
+      : `No pending item found for ${recordId}. It may already be processing or completed.`,
+  });
 });
 
 /**

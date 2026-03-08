@@ -266,6 +266,31 @@ const Z_AI_BASE_URL = process.env.Z_AI_BASE_URL || 'https://open.bigmodel.cn/api
 // const Z_AI_BASE_URL = process.env.Z_AI_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';
 const Z_AI_MODEL = process.env.Z_AI_MODEL || 'glm-5';
 
+/**
+ * Model-specific default max_tokens (Z.AI chat/completions)
+ * Based on Z.AI API docs:
+ * - GLM-5/4.7/4.6 series: 128K
+ * - GLM-4.6V series: 32K
+ * - GLM-4.5 series: 96K
+ * - GLM-4.5V + GLM-4-32B-0414-128K: 16K
+ */
+function getDefaultMaxTokens(model: string): number {
+  const m = (model || '').toLowerCase();
+
+  if (m === 'glm-5' || m.startsWith('glm-5-')) return 128_000;
+  if (m.startsWith('glm-4.7')) return 128_000;
+  if (m === 'glm-4.6' || m.startsWith('glm-4.6-')) return 128_000;
+  if (m.startsWith('glm-4.6v')) return 32_000;
+  if (m.startsWith('glm-4.5v')) return 16_000;
+  if (m === 'glm-4-32b-0414-128k') return 16_000;
+  if (m.startsWith('glm-4.5')) return 96_000;
+
+  // Safe fallback when unknown model is configured
+  return 8_192;
+}
+
+const Z_AI_DEFAULT_MAX_TOKENS = getDefaultMaxTokens(Z_AI_MODEL);
+
 // Rate limiting config (requests per minute)
 const RATE_LIMITS = {
   zai: 60,
@@ -373,6 +398,7 @@ interface EnrichmentQueueItem {
   retries: number;
   lastError?: string;
   createdAt: number;
+  startedAt?: number;
   resolve: () => void;
   reject: (err: Error) => void;
 }
@@ -384,6 +410,7 @@ interface RateLimitTracker {
 // Global state
 const queue: EnrichmentQueueItem[] = [];
 const activeRecordIds = new Set<string>(); // Dedup: prevent same attachment being processed concurrently
+const activeWorkers: { zai: EnrichmentQueueItem[] } = { zai: [] };
 const processing = { zai: 0 };
 const rateLimiter: RateLimitTracker = {
   zai: { lastReset: Date.now(), count: 0 },
@@ -797,6 +824,7 @@ ${allPageContent}`;
           },
           body: JSON.stringify({
             model: Z_AI_MODEL,
+            max_tokens: Z_AI_DEFAULT_MAX_TOKENS,
             messages: [{ role: 'user', content: combinePrompt }],
           }),
         });
@@ -808,10 +836,10 @@ ${allPageContent}`;
           finalSummary = parsed.title ? `${parsed.title}: ${parsed.summary}` : parsed.summary;
           if (parsed.tags.length > 0) finalLabels = [...finalLabels, ...parsed.tags];
         } else {
-          finalSummary = `PDF Document (${pageFiles.length} pages): ${allPageContent.substring(0, 500)}`;
+          finalSummary = `PDF Document (${pageFiles.length} pages): ${allPageContent}`;
         }
       } catch {
-        finalSummary = `PDF Document (${pageFiles.length} pages): ${allPageContent.substring(0, 500)}`;
+        finalSummary = `PDF Document (${pageFiles.length} pages): ${allPageContent}`;
       }
     } else {
       // Single page — use page summary directly
@@ -960,6 +988,7 @@ async function enrichWithZaiDirect(item: EnrichmentQueueItem): Promise<void> {
     },
     body: JSON.stringify({
       model: Z_AI_MODEL,
+      max_tokens: Z_AI_DEFAULT_MAX_TOKENS,
       messages: [{ role: 'user', content: userContent }],
     }),
   });
@@ -1021,7 +1050,7 @@ function parseStructuredSummary(text: string): {
 
   return {
     title: titleMatch?.[1]?.trim() || '',
-    summary: summaryMatch?.[1]?.trim() || text.substring(0, 500),
+    summary: summaryMatch?.[1]?.trim() || text.trim(),
     tags: tagsMatch?.[1]?.trim().split(/,\s*/).map((t: string) => t.trim()).filter(Boolean) || [],
     rawContent: rawContentMatch?.[1]?.trim() || '',
   };
@@ -1070,13 +1099,14 @@ async function storeEnrichmentResults(recordId: string, data: any): Promise<void
 async function processNextItem(
   apiName: 'zai'
 ): Promise<void> {
-  // Find next item for this API
+  // Find and dequeue next item for this API
   const itemIdx = queue.findIndex(item => item.enrichmentType === 'zai');
+  if (itemIdx === -1) return;
 
-  if (itemIdx === -1) return; // No items for this API
-
-  const item = queue[itemIdx];
+  const [item] = queue.splice(itemIdx, 1);
   const startTime = Date.now();
+  item.startedAt = startTime;
+  activeWorkers[apiName].push(item);
 
   try {
     console.log(`[${apiName}] Starting enrichment for ${item.recordId} (${item.fileName})`);
@@ -1085,7 +1115,6 @@ async function processNextItem(
 
     // Success
     const duration = Date.now() - startTime;
-    queue.splice(itemIdx, 1);
     activeRecordIds.delete(item.recordId);
     recordSuccess();
     console.log(
@@ -1109,12 +1138,12 @@ async function processNextItem(
       // Retry with exponential backoff
       const backoffMs = RETRY_BACKOFF_MS[item.retries] || RETRY_BACKOFF_MS[RETRY_BACKOFF_MS.length - 1];
       item.retries++;
+      item.startedAt = undefined;
       const backoffLabel = backoffMs >= 60000 ? `${(backoffMs / 60000).toFixed(0)}m` : `${(backoffMs / 1000).toFixed(0)}s`;
       console.warn(
         `[${apiName}] Retry scheduled for ${item.recordId} (attempt ${item.retries}/${MAX_RETRIES}) in ${backoffLabel}. Error: ${error.message}`
       );
       setTimeout(() => {
-        // Re-add to queue
         queue.push(item);
         processQueue();
       }, backoffMs);
@@ -1123,11 +1152,14 @@ async function processNextItem(
       console.error(
         `[${apiName}] Failed to enrich ${item.recordId} after ${MAX_RETRIES} retries (${duration}ms): ${error.message}`
       );
-      queue.splice(itemIdx, 1);
       activeRecordIds.delete(item.recordId);
+      item.startedAt = undefined;
       deadLetterQueue.push(item);
       item.reject(error);
     }
+  } finally {
+    const workerIdx = activeWorkers[apiName].findIndex(w => w.recordId === item.recordId);
+    if (workerIdx >= 0) activeWorkers[apiName].splice(workerIdx, 1);
   }
 }
 
@@ -1203,6 +1235,16 @@ export function getQueueStatus() {
     processing: {
       zai: processing.zai,
     },
+    activeWorkers: {
+      zai: activeWorkers.zai.map(item => ({
+        recordId: item.recordId,
+        fileName: item.fileName,
+        fileType: item.fileType,
+        retries: item.retries,
+        startedAt: item.startedAt || Date.now(),
+        elapsedMs: item.startedAt ? Date.now() - item.startedAt : 0,
+      })),
+    },
     adaptiveConcurrency: {
       current: adaptiveState.current,
       min: ADAPTIVE_CONCURRENCY.min,
@@ -1231,11 +1273,12 @@ export function getQueueStatus() {
 }
 
 export function getQueueItems() {
-  return queue.slice(0, 50).map(item => ({
+  return queue.slice(0, 100).map(item => ({
     recordId: item.recordId,
     fileName: item.fileName,
     fileType: item.fileType,
     retries: item.retries,
+    lastError: item.lastError,
     enrichmentType: item.enrichmentType,
     createdAt: item.createdAt,
   }));
@@ -1272,16 +1315,23 @@ export function resumeQueue(): void {
 }
 
 /**
- * Cancel all pending items in the queue (does not affect in-flight)
+ * Cancel pending items in the queue (does not affect in-flight workers)
+ * If recordIds are provided, only those pending items are cancelled.
  */
-export function cancelPending(): number {
-  const count = queue.length;
-  for (const item of queue) {
+export function cancelPending(recordIds?: string[]): number {
+  const targets = recordIds && recordIds.length > 0 ? new Set(recordIds) : null;
+  let cancelled = 0;
+
+  for (let i = queue.length - 1; i >= 0; i--) {
+    const item = queue[i];
+    if (targets && !targets.has(item.recordId)) continue;
+    queue.splice(i, 1);
     activeRecordIds.delete(item.recordId);
     item.reject(new Error('Cancelled'));
+    cancelled++;
   }
-  queue.length = 0;
-  return count;
+
+  return cancelled;
 }
 
 /**

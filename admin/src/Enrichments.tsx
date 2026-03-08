@@ -21,6 +21,16 @@ interface QueueStatus {
   processing: {
     zai: number;
   };
+  activeWorkers?: {
+    zai: Array<{
+      recordId: string;
+      fileName: string;
+      fileType: string;
+      retries: number;
+      startedAt: number;
+      elapsedMs: number;
+    }>;
+  };
   adaptiveConcurrency: {
     current: number;
     min: number;
@@ -48,6 +58,7 @@ interface QueueItem {
   fileName: string;
   fileType: string;
   retries: number;
+  lastError?: string;
   enrichmentType: string;
   createdAt: number;
 }
@@ -76,6 +87,7 @@ export default function Enrichments() {
   const [tokenInput, setTokenInput] = useState(localStorage.getItem('admin_token') || '');
   const [status, setStatus] = useState<QueueStatus | null>(null);
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
+  const [selectedPendingIds, setSelectedPendingIds] = useState<string[]>([]);
   const [isPolling, setIsPolling] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -149,7 +161,9 @@ export default function Enrichments() {
       const res = await fetch(`${BASE}/api/enrichments/queue-items`, { headers });
       if (res.ok) {
         const data = await res.json();
-        setQueueItems(data.items || []);
+        const items: QueueItem[] = data.items || [];
+        setQueueItems(items);
+        setSelectedPendingIds(prev => prev.filter(id => items.some(item => item.recordId === id)));
       }
     } catch {}
   }
@@ -163,6 +177,14 @@ export default function Enrichments() {
     if (hours < 24) return `${hours}h ago`;
     const days = Math.floor(hours / 24);
     return `${days}d ago`;
+  }
+
+  function formatDuration(ms: number) {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes === 0) return `${seconds}s`;
+    return `${minutes}m ${seconds}s`;
   }
 
   async function loadHistory(recordId: string) {
@@ -334,6 +356,47 @@ export default function Enrichments() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || 'Failed');
       showToast(`Cancelled ${data.cancelled} pending items`, 'info');
+      setSelectedPendingIds([]);
+      await loadStatus();
+      await loadQueueItems();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed', 'error');
+    } finally {
+      setActionLoading('');
+    }
+  }
+
+  async function cancelPendingItem(recordId: string) {
+    if (!token) return;
+    try {
+      setActionLoading(`cancel-${recordId}`);
+      const res = await fetch(`${BASE}/api/enrichments/cancel-pending/${recordId}`, { method: 'POST', headers });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Failed');
+      showToast(data.message || 'Pending item cancelled', 'info');
+      setSelectedPendingIds(prev => prev.filter(id => id !== recordId));
+      await loadStatus();
+      await loadQueueItems();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed', 'error');
+    } finally {
+      setActionLoading('');
+    }
+  }
+
+  async function cancelSelectedPending() {
+    if (!token || selectedPendingIds.length === 0) return;
+    try {
+      setActionLoading('cancel-selected');
+      const res = await fetch(`${BASE}/api/enrichments/cancel-pending`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ recordIds: selectedPendingIds }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Failed');
+      showToast(`Cancelled ${data.cancelled} selected pending items`, 'info');
+      setSelectedPendingIds([]);
       await loadStatus();
       await loadQueueItems();
     } catch (err: any) {
@@ -388,24 +451,56 @@ export default function Enrichments() {
         {loading && !status ? (
           <p>Loading…</p>
         ) : status ? (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
-            <div>
-              <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#888' }}>PENDING</p>
-              <p style={{ margin: 0, fontSize: 24, fontWeight: 'bold' }}>{status.pending}</p>
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
+              <div>
+                <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#888' }}>PENDING</p>
+                <p style={{ margin: 0, fontSize: 24, fontWeight: 'bold' }}>{status.pending}</p>
+              </div>
+              <div>
+                <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#888' }}>PROCESSING</p>
+                <p style={{ margin: 0, fontSize: 24, fontWeight: 'bold' }}>
+                  {totalProcessing} <span style={{ fontSize: 14, color: '#888' }}>(Z.AI: {status.processing.zai})</span>
+                </p>
+              </div>
+              <div>
+                <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#888' }}>DEAD LETTERS</p>
+                <p style={{ margin: 0, fontSize: 24, fontWeight: 'bold', color: status.deadLetterCount > 0 ? '#ff6b6b' : 'inherit' }}>
+                  {status.deadLetterCount}
+                </p>
+              </div>
             </div>
-            <div>
-              <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#888' }}>PROCESSING</p>
-              <p style={{ margin: 0, fontSize: 24, fontWeight: 'bold' }}>
-                {totalProcessing} <span style={{ fontSize: 14, color: '#888' }}>(Z.AI: {status.processing.zai})</span>
-              </p>
+
+            <div style={{ borderTop: '1px solid #333', paddingTop: 12 }}>
+              <h3 style={{ margin: '0 0 8px 0' }}>🧵 Active Workers ({status.activeWorkers?.zai?.length || 0})</h3>
+              {status.activeWorkers?.zai?.length ? (
+                <div style={{ maxHeight: 220, overflow: 'auto' }}>
+                  <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Filename</th>
+                        <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Type</th>
+                        <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Retries</th>
+                        <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Elapsed</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {status.activeWorkers.zai.map(worker => (
+                        <tr key={worker.recordId}>
+                          <td style={{ borderBottom: '1px solid #eee', padding: 6, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{worker.fileName}</td>
+                          <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{worker.fileType}</td>
+                          <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{worker.retries}</td>
+                          <td style={{ borderBottom: '1px solid #eee', padding: 6, color: '#888' }}>{formatDuration(worker.elapsedMs)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p style={{ margin: 0, color: '#888' }}>No active workers right now.</p>
+              )}
             </div>
-            <div>
-              <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#888' }}>DEAD LETTERS</p>
-              <p style={{ margin: 0, fontSize: 24, fontWeight: 'bold', color: status.deadLetterCount > 0 ? '#ff6b6b' : 'inherit' }}>
-                {status.deadLetterCount}
-              </p>
-            </div>
-          </div>
+          </>
         ) : null}
       </div>
 
@@ -552,26 +647,79 @@ export default function Enrichments() {
       {/* Queue */}
       {status && status.pending > 0 && queueItems.length > 0 && (
         <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 14, marginBottom: 16 }}>
-          <h2 style={{ marginTop: 0 }}>📋 Queue ({status.pending})</h2>
-          <div style={{ maxHeight: 300, overflow: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+            <h2 style={{ margin: 0 }}>📋 Pending Queue ({status.pending})</h2>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={cancelSelectedPending}
+                disabled={selectedPendingIds.length === 0 || !!actionLoading}
+                style={{
+                  background: '#f44336', color: 'white', border: 'none', padding: '6px 10px',
+                  borderRadius: 4, cursor: 'pointer', opacity: selectedPendingIds.length === 0 || !!actionLoading ? 0.6 : 1,
+                }}
+              >
+                {actionLoading === 'cancel-selected' ? '⏳…' : `Cancel Selected (${selectedPendingIds.length})`}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ maxHeight: 360, overflow: 'auto' }}>
             <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={queueItems.length > 0 && selectedPendingIds.length === queueItems.length}
+                      onChange={(e) => setSelectedPendingIds(e.target.checked ? queueItems.map(item => item.recordId) : [])}
+                    />
+                  </th>
                   <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Filename</th>
                   <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Type</th>
                   <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Retries</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Last Error</th>
                   <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Queued At</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {queueItems.map((item, i) => (
-                  <tr key={`${item.recordId}-${i}`}>
-                    <td style={{ borderBottom: '1px solid #eee', padding: 6, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.fileName}</td>
-                    <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{item.fileType}</td>
-                    <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{item.retries}</td>
-                    <td style={{ borderBottom: '1px solid #eee', padding: 6, color: '#888' }}>{formatRelativeTime(item.createdAt)}</td>
-                  </tr>
-                ))}
+                {queueItems.map((item, i) => {
+                  const isSelected = selectedPendingIds.includes(item.recordId);
+                  return (
+                    <tr key={`${item.recordId}-${i}`}>
+                      <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => {
+                            setSelectedPendingIds(prev => e.target.checked
+                              ? [...prev, item.recordId]
+                              : prev.filter(id => id !== item.recordId));
+                          }}
+                        />
+                      </td>
+                      <td style={{ borderBottom: '1px solid #eee', padding: 6, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.fileName}</td>
+                      <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{item.fileType}</td>
+                      <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{item.retries}</td>
+                      <td style={{ borderBottom: '1px solid #eee', padding: 6, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: item.lastError ? '#ffb4b4' : '#888' }}>
+                        {item.lastError || '—'}
+                      </td>
+                      <td style={{ borderBottom: '1px solid #eee', padding: 6, color: '#888' }}>{formatRelativeTime(item.createdAt)}</td>
+                      <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>
+                        <button
+                          onClick={() => cancelPendingItem(item.recordId)}
+                          disabled={!!actionLoading}
+                          style={{
+                            background: '#5f1e1e', color: '#ffb4b4', border: '1px solid #ff6b6b', borderRadius: 4,
+                            padding: '4px 8px', cursor: 'pointer', opacity: !!actionLoading ? 0.6 : 1,
+                          }}
+                        >
+                          {actionLoading === `cancel-${item.recordId}` ? 'Cancelling…' : 'Cancel'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

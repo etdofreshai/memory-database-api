@@ -56,6 +56,14 @@ export class McpVisionClient extends EventEmitter {
       throw new Error('ZAI_TOKEN / Z_AI_API_KEY not set for MCP vision server');
     }
 
+    // @z_ai/mcp-server uses Z_AI_VISION_MODEL_MAX_TOKENS (max_tokens internally).
+    // Accept max_output_tokens-style aliases too for convenience.
+    const visionMaxTokens =
+      process.env.Z_AI_VISION_MODEL_MAX_TOKENS ||
+      process.env.Z_AI_VISION_MODEL_MAX_OUTPUT_TOKENS ||
+      process.env.Z_AI_MCP_MAX_OUTPUT_TOKENS ||
+      '32000';
+
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.kill();
@@ -70,6 +78,7 @@ export class McpVisionClient extends EventEmitter {
             Z_AI_API_KEY: apiKey,
             ZAI_TOKEN: apiKey,
             Z_AI_MODE: 'ZAI',
+            Z_AI_VISION_MODEL_MAX_TOKENS: visionMaxTokens,
           },
           shell: true,
         });
