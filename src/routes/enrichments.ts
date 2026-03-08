@@ -217,6 +217,27 @@ router.post('/cancel-pending', requireAuth('admin'), async (_req, res) => {
  * Update adaptive concurrency settings
  * Body: { current?, min?, max?, increment? }
  */
+/**
+ * GET /api/enrichments/recent-summaries
+ * Get the most recently generated summaries
+ */
+router.get('/recent-summaries', requireAuth('read', 'write', 'admin'), async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 20, 50);
+    const result = await pool.query(
+      `SELECT record_id, original_file_name, file_type, summary_text, summary_model, summary_updated_at
+       FROM current_attachments
+       WHERE summary_text IS NOT NULL AND summary_updated_at IS NOT NULL
+       ORDER BY summary_updated_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+    res.json({ summaries: result.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/adaptive-settings', requireAuth('write', 'admin'), async (req, res) => {
   try {
     const result = updateAdaptiveSettings(req.body);

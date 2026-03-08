@@ -59,6 +59,7 @@ export default function Enrichments() {
   const [backfillLimit, setBackfillLimit] = useState('100');
   const [forceReenrich, setForceReenrich] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [recentSummaries, setRecentSummaries] = useState<Array<{ record_id: string; original_file_name: string; summary_text: string; summary_model: string; summary_updated_at: string; file_type: string }>>([]);
   const [concurrencyInput, setConcurrencyInput] = useState('5');
   const [incrementInput, setIncrementInput] = useState('1');
   const [minInput, setMinInput] = useState('1');
@@ -91,6 +92,17 @@ export default function Enrichments() {
     }
   }
 
+  async function loadRecentSummaries() {
+    if (!token) return;
+    try {
+      const res = await fetch(`${BASE}/api/enrichments/recent-summaries?limit=20`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setRecentSummaries(data.summaries || []);
+      }
+    } catch {}
+  }
+
   async function loadUnsummarizedCount() {
     if (!token) return;
     try {
@@ -105,6 +117,7 @@ export default function Enrichments() {
   useEffect(() => {
     loadStatus();
     loadUnsummarizedCount();
+    loadRecentSummaries();
   }, [token]);
 
   useEffect(() => {
@@ -112,6 +125,7 @@ export default function Enrichments() {
     const timer = setInterval(() => {
       loadStatus();
       loadUnsummarizedCount();
+      loadRecentSummaries();
     }, 4000);
     return () => clearInterval(timer);
   }, [isPolling, token]);
@@ -427,6 +441,31 @@ export default function Enrichments() {
           </label>
         </div>
       </div>
+
+      {/* Recent Summaries */}
+      {recentSummaries.length > 0 && (
+        <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 14, marginBottom: 16 }}>
+          <h2 style={{ marginTop: 0 }}>📝 Recent Summaries (last {recentSummaries.length})</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {recentSummaries.map((s, i) => (
+              <div key={i} style={{ border: '1px solid #333', borderRadius: 6, padding: 10, background: '#1a1a1a' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ fontWeight: 'bold', fontSize: 13 }}>
+                    {s.file_type === 'image' ? '🖼️' : s.file_type === 'video' ? '🎬' : s.file_type === 'audio' ? '🎵' : '📄'}{' '}
+                    {s.original_file_name}
+                  </span>
+                  <span style={{ fontSize: 11, color: '#888' }}>
+                    {new Date(s.summary_updated_at).toLocaleString()} · {s.summary_model}
+                  </span>
+                </div>
+                <p style={{ margin: 0, fontSize: 13, color: '#ccc', whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto' }}>
+                  {s.summary_text}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
