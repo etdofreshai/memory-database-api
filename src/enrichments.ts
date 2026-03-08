@@ -346,8 +346,20 @@ function isErrorSummary(text: string): boolean {
 }
 
 // Retry config
-const MAX_RETRIES = 3;
-const INITIAL_BACKOFF_MS = 1000;
+// Retry backoff schedule: 5s, 10s, 15s, 30s, 1m, 5m, 10m, 15m, 30m, 1h (stop after ~2h total)
+const RETRY_BACKOFF_MS = [
+  5_000,      // 5 seconds
+  10_000,     // 10 seconds
+  15_000,     // 15 seconds
+  30_000,     // 30 seconds
+  60_000,     // 1 minute
+  300_000,    // 5 minutes
+  600_000,    // 10 minutes
+  900_000,    // 15 minutes
+  1_800_000,  // 30 minutes
+  3_600_000,  // 1 hour
+];
+const MAX_RETRIES = RETRY_BACKOFF_MS.length;
 
 type EnrichmentType = 'zai';
 
@@ -995,10 +1007,11 @@ async function processNextItem(
 
     if (!isNoRetry && item.retries < MAX_RETRIES) {
       // Retry with exponential backoff
+      const backoffMs = RETRY_BACKOFF_MS[item.retries] || RETRY_BACKOFF_MS[RETRY_BACKOFF_MS.length - 1];
       item.retries++;
-      const backoffMs = INITIAL_BACKOFF_MS * Math.pow(2, item.retries - 1);
+      const backoffLabel = backoffMs >= 60000 ? `${(backoffMs / 60000).toFixed(0)}m` : `${(backoffMs / 1000).toFixed(0)}s`;
       console.warn(
-        `[${apiName}] Retry scheduled for ${item.recordId} (attempt ${item.retries}/${MAX_RETRIES}) in ${backoffMs}ms. Error: ${error.message}`
+        `[${apiName}] Retry scheduled for ${item.recordId} (attempt ${item.retries}/${MAX_RETRIES}) in ${backoffLabel}. Error: ${error.message}`
       );
       setTimeout(() => {
         // Re-add to queue
