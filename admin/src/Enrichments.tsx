@@ -84,7 +84,7 @@ export default function Enrichments() {
   const [backfillLimit, setBackfillLimit] = useState('100');
   const [forceReenrich, setForceReenrich] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [recentSummaries, setRecentSummaries] = useState<Array<{ record_id: string; original_file_name: string; summary_text: string; summary_model: string; summary_updated_at: string; file_type: string }>>([]);
+  const [recentSummaries, setRecentSummaries] = useState<Array<{ record_id: string; original_file_name: string; summary_text: string; summary_model: string; summary_updated_at: string; file_type: string; mime_type?: string }>>([]);
   const [historyRecordId, setHistoryRecordId] = useState<string | null>(null);
   const [historyVersions, setHistoryVersions] = useState<HistoryVersion[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -623,21 +623,37 @@ export default function Enrichments() {
               <div
                 key={i}
                 onClick={() => loadHistory(s.record_id)}
-                style={{ border: '1px solid #333', borderRadius: 6, padding: 10, background: '#1a1a1a', cursor: 'pointer' }}
+                style={{ border: '1px solid #333', borderRadius: 6, padding: 10, background: '#1a1a1a', cursor: 'pointer', display: 'flex', gap: 12 }}
                 title="Click to view version history"
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <span style={{ fontWeight: 'bold', fontSize: 13 }}>
-                    {s.file_type === 'image' ? '🖼️' : s.file_type === 'video' ? '🎬' : s.file_type === 'audio' ? '🎵' : '📄'}{' '}
-                    {s.original_file_name}
-                  </span>
-                  <span style={{ fontSize: 11, color: '#888' }}>
-                    {new Date(s.summary_updated_at).toLocaleString()} · {s.summary_model}
-                  </span>
+                {/* Thumbnail preview */}
+                {(s.file_type === 'image' || s.mime_type?.startsWith('image/')) ? (
+                  <img
+                    src={`${BASE}/api/attachments/${s.record_id}/file?token=${token}`}
+                    alt={s.original_file_name}
+                    style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 4, flexShrink: 0, background: '#333' }}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                ) : s.file_type === 'video' ? (
+                  <div style={{ width: 80, height: 80, borderRadius: 4, flexShrink: 0, background: '#333', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>🎬</div>
+                ) : s.file_type === 'audio' ? (
+                  <div style={{ width: 80, height: 80, borderRadius: 4, flexShrink: 0, background: '#333', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>🎵</div>
+                ) : (
+                  <div style={{ width: 80, height: 80, borderRadius: 4, flexShrink: 0, background: '#333', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>📄</div>
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontWeight: 'bold', fontSize: 13 }}>
+                      {s.original_file_name}
+                    </span>
+                    <span style={{ fontSize: 11, color: '#888', flexShrink: 0, marginLeft: 8 }}>
+                      {new Date(s.summary_updated_at).toLocaleString()} · {s.summary_model}
+                    </span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: 13, color: '#ccc', whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto' }}>
+                    {s.summary_text}
+                  </p>
                 </div>
-                <p style={{ margin: 0, fontSize: 13, color: '#ccc', whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto' }}>
-                  {s.summary_text}
-                </p>
               </div>
             ))}
           </div>
