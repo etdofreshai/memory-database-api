@@ -238,6 +238,121 @@ router.get('/recent-summaries', requireAuth('read', 'write', 'admin'), async (re
   }
 });
 
+
+/**
+ * GET /api/enrichments/history/:record_id
+ * Get all attachment versions for a record_id (SCD Type 2 history)
+ */
+router.get('/history/:record_id', requireAuth('read', 'write', 'admin'), async (req, res) => {
+  const record_id = String(req.params.record_id);
+
+  try {
+    const result = await pool.query(
+      `SELECT id, record_id, summary_text, summary_model, summary_updated_at, labels, ocr_text,
+              effective_from, effective_to, is_active, created_at
+       FROM attachments
+       WHERE record_id = $1
+       ORDER BY effective_from DESC`,
+      [record_id]
+    );
+
+    res.json({ versions: result.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/enrichments/revert/:record_id/:version_id
+ * Revert active attachment row to a previous version
+ */
+router.post('/revert/:record_id/:version_id', requireAuth('write', 'admin'), async (req, res) => {
+  const record_id = String(req.params.record_id);
+  const version_id = Number(req.params.version_id);
+
+  if (!Number.isInteger(version_id) || version_id <= 0) {
+    res.status(400).json({ error: 'Invalid version_id' });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const target = await client.query(
+      `SELECT id, is_active
+       FROM attachments
+       WHERE record_id = $1 AND id = $2
+       FOR UPDATE`,
+      [record_id, version_id]
+    );
+
+    if (target.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Version not found for record' });
+      return;
+    }
+
+    await client.query(
+      `UPDATE attachments
+       SET is_active = FALSE, effective_to = NOW()
+       WHERE record_id = $1 AND is_active = TRUE AND id <> $2`,
+      [record_id, version_id]
+    );
+
+    await client.query(
+      `UPDATE attachments
+       SET is_active = TRUE, effective_to = NULL
+       WHERE record_id = $1 AND id = $2`,
+      [record_id, version_id]
+    );
+
+    await client.query('COMMIT');
+    res.json({ message: `Reverted to version ${version_id}` });
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * DELETE /api/enrichments/history/:version_id
+ * Hard delete a specific non-active version by row id
+ */
+router.delete('/history/:version_id', requireAuth('admin'), async (req, res) => {
+  const version_id = Number(req.params.version_id);
+
+  if (!Number.isInteger(version_id) || version_id <= 0) {
+    res.status(400).json({ error: 'Invalid version_id' });
+    return;
+  }
+
+  try {
+    const version = await pool.query(
+      `SELECT id, is_active FROM attachments WHERE id = $1 LIMIT 1`,
+      [version_id]
+    );
+
+    if (version.rows.length === 0) {
+      res.status(404).json({ error: 'Version not found' });
+      return;
+    }
+
+    if (version.rows[0].is_active) {
+      res.status(400).json({ error: 'Cannot delete active version' });
+      return;
+    }
+
+    await pool.query(`DELETE FROM attachments WHERE id = $1`, [version_id]);
+    res.json({ message: 'Version deleted' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 router.post('/adaptive-settings', requireAuth('write', 'admin'), async (req, res) => {
   try {
     const result = updateAdaptiveSettings(req.body);

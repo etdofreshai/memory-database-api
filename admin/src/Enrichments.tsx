@@ -1,5 +1,20 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 
+
+interface HistoryVersion {
+  id: number;
+  record_id: string;
+  summary_text: string | null;
+  summary_model: string | null;
+  summary_updated_at: string | null;
+  labels: any;
+  ocr_text: string | null;
+  effective_from: string;
+  effective_to: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
 interface QueueStatus {
   paused: boolean;
   pending: number;
@@ -60,6 +75,10 @@ export default function Enrichments() {
   const [forceReenrich, setForceReenrich] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [recentSummaries, setRecentSummaries] = useState<Array<{ record_id: string; original_file_name: string; summary_text: string; summary_model: string; summary_updated_at: string; file_type: string }>>([]);
+  const [historyRecordId, setHistoryRecordId] = useState<string | null>(null);
+  const [historyVersions, setHistoryVersions] = useState<HistoryVersion[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [expandedHistoryVersions, setExpandedHistoryVersions] = useState<number[]>([]);
   const [concurrencyInput, setConcurrencyInput] = useState('5');
   const [incrementInput, setIncrementInput] = useState('1');
   const [minInput, setMinInput] = useState('1');
@@ -112,6 +131,76 @@ export default function Enrichments() {
         setUnsummarizedCount(data.count);
       }
     } catch {}
+  }
+
+
+  async function loadHistory(recordId: string) {
+    if (!token) return;
+    try {
+      setHistoryRecordId(recordId);
+      setHistoryLoading(true);
+      setExpandedHistoryVersions([]);
+      const res = await fetch(`${BASE}/api/enrichments/history/${recordId}`, { headers });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Failed to load history');
+      setHistoryVersions(data.versions || []);
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to load history', 'error');
+      setHistoryRecordId(null);
+      setHistoryVersions([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function revertVersion(recordId: string, versionId: number) {
+    if (!token) return;
+    try {
+      setActionLoading(`revert-${versionId}`);
+      const res = await fetch(`${BASE}/api/enrichments/revert/${recordId}/${versionId}`, {
+        method: 'POST',
+        headers,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Failed to revert version');
+      showToast(data.message || `Reverted to version ${versionId}`, 'success');
+      await loadHistory(recordId);
+      await loadRecentSummaries();
+      await loadStatus();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to revert version', 'error');
+    } finally {
+      setActionLoading('');
+    }
+  }
+
+  async function deleteVersion(versionId: number, recordId: string) {
+    if (!token) return;
+    const ok = window.confirm(`Delete version ${versionId}? This cannot be undone.`);
+    if (!ok) return;
+
+    try {
+      setActionLoading(`delete-${versionId}`);
+      const res = await fetch(`${BASE}/api/enrichments/history/${versionId}`, {
+        method: 'DELETE',
+        headers,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Failed to delete version');
+      showToast(data.message || 'Version deleted', 'success');
+      await loadHistory(recordId);
+      await loadRecentSummaries();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to delete version', 'error');
+    } finally {
+      setActionLoading('');
+    }
+  }
+
+  function toggleHistoryExpand(versionId: number) {
+    setExpandedHistoryVersions(prev => prev.includes(versionId)
+      ? prev.filter(id => id !== versionId)
+      : [...prev, versionId]);
   }
 
   useEffect(() => {
@@ -448,7 +537,12 @@ export default function Enrichments() {
           <h2 style={{ marginTop: 0 }}>📝 Recent Summaries (last {recentSummaries.length})</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {recentSummaries.map((s, i) => (
-              <div key={i} style={{ border: '1px solid #333', borderRadius: 6, padding: 10, background: '#1a1a1a' }}>
+              <div
+                key={i}
+                onClick={() => loadHistory(s.record_id)}
+                style={{ border: '1px solid #333', borderRadius: 6, padding: 10, background: '#1a1a1a', cursor: 'pointer' }}
+                title="Click to view version history"
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                   <span style={{ fontWeight: 'bold', fontSize: 13 }}>
                     {s.file_type === 'image' ? '🖼️' : s.file_type === 'video' ? '🎬' : s.file_type === 'audio' ? '🎵' : '📄'}{' '}
@@ -463,6 +557,95 @@ export default function Enrichments() {
                 </p>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {historyRecordId && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 10000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }}>
+          <div style={{
+            width: 'min(920px, 95vw)', maxHeight: '90vh', overflow: 'auto',
+            background: '#1a1a1a', border: '1px solid #333', borderRadius: 10, padding: 16,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h2 style={{ margin: 0 }}>🕘 Version History</h2>
+              <button onClick={() => { setHistoryRecordId(null); setHistoryVersions([]); }}
+                style={{ background: '#333', color: '#fff', border: '1px solid #444', borderRadius: 4, padding: '6px 10px', cursor: 'pointer' }}>
+                Close
+              </button>
+            </div>
+
+            <p style={{ fontSize: 12, color: '#888', marginTop: 0, wordBreak: 'break-all' }}>
+              record_id: {historyRecordId}
+            </p>
+
+            {historyLoading ? (
+              <p>Loading history…</p>
+            ) : historyVersions.length === 0 ? (
+              <p style={{ color: '#aaa' }}>No versions found.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {historyVersions.map(v => {
+                  const expanded = expandedHistoryVersions.includes(v.id);
+                  const summary = v.summary_text || '(no summary)';
+                  const preview = summary.length > 200 ? `${summary.slice(0, 200)}...` : summary;
+                  return (
+                    <div key={v.id} style={{
+                      border: `1px solid ${v.is_active ? '#2e7d32' : '#333'}`,
+                      borderRadius: 8,
+                      padding: 10,
+                      background: v.is_active ? '#102010' : '#141414',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>
+                            {new Date(v.effective_from || v.created_at).toLocaleString()} · {v.summary_model || 'unknown model'}
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            <strong>Version #{v.id}</strong>
+                            {v.is_active && (
+                              <span style={{ fontSize: 11, background: '#2e7d32', color: 'white', borderRadius: 999, padding: '2px 8px' }}>
+                                ACTIVE
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {!v.is_active && (
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                              onClick={() => revertVersion(v.record_id, v.id)}
+                              disabled={!!actionLoading}
+                              style={{ background: '#2196f3', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 10px', cursor: 'pointer', opacity: actionLoading ? 0.7 : 1 }}>
+                              {actionLoading === `revert-${v.id}` ? 'Reverting…' : 'Revert'}
+                            </button>
+                            <button
+                              onClick={() => deleteVersion(v.id, v.record_id)}
+                              disabled={!!actionLoading}
+                              style={{ background: '#c62828', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 10px', cursor: 'pointer', opacity: actionLoading ? 0.7 : 1 }}>
+                              {actionLoading === `delete-${v.id}` ? 'Deleting…' : 'Delete'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div
+                        onClick={() => toggleHistoryExpand(v.id)}
+                        style={{ marginTop: 8, fontSize: 13, color: '#ccc', whiteSpace: 'pre-wrap', cursor: 'pointer' }}>
+                        {expanded ? summary : preview}
+                        {summary.length > 200 && (
+                          <span style={{ color: '#66b3ff', marginLeft: 6 }}>
+                            {expanded ? 'Show less' : 'Show more'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
