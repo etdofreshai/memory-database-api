@@ -613,22 +613,24 @@ export default function Enrichments() {
                             )}
                           </div>
                         </div>
-                        {!v.is_active && (
-                          <div style={{ display: 'flex', gap: 8 }}>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          {!v.is_active && (
                             <button
                               onClick={() => revertVersion(v.record_id, v.id)}
                               disabled={!!actionLoading}
                               style={{ background: '#2196f3', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 10px', cursor: 'pointer', opacity: actionLoading ? 0.7 : 1 }}>
                               {actionLoading === `revert-${v.id}` ? 'Reverting…' : 'Revert'}
                             </button>
+                          )}
+                          {(!v.is_active || historyVersions.length >= 2) && (
                             <button
                               onClick={() => deleteVersion(v.id, v.record_id)}
                               disabled={!!actionLoading}
                               style={{ background: '#c62828', color: '#fff', border: 'none', borderRadius: 4, padding: '6px 10px', cursor: 'pointer', opacity: actionLoading ? 0.7 : 1 }}>
-                              {actionLoading === `delete-${v.id}` ? 'Deleting…' : 'Delete'}
+                              {actionLoading === `delete-${v.id}` ? 'Deleting…' : v.is_active ? 'Delete & Revert' : 'Delete'}
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </div>
 
                       <div

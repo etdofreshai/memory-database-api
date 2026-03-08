@@ -341,7 +341,32 @@ router.delete('/history/:version_id', requireAuth('admin'), async (req, res) => 
     }
 
     if (version.rows[0].is_active) {
-      res.status(400).json({ error: 'Cannot delete active version' });
+      // Check if there are other versions to promote
+      const others = await pool.query(
+        `SELECT id FROM attachments WHERE record_id = (SELECT record_id FROM attachments WHERE id = $1) AND id != $1 ORDER BY effective_from DESC LIMIT 1`,
+        [version_id]
+      );
+
+      if (others.rows.length === 0) {
+        res.status(400).json({ error: 'Cannot delete the only version' });
+        return;
+      }
+
+      // Promote previous version and delete active one
+      await pool.query('BEGIN');
+      try {
+        await pool.query(
+          `UPDATE attachments SET is_active = TRUE, effective_to = NULL WHERE id = $1`,
+          [others.rows[0].id]
+        );
+        await pool.query(`DELETE FROM attachments WHERE id = $1`, [version_id]);
+        await pool.query('COMMIT');
+      } catch (err) {
+        await pool.query('ROLLBACK');
+        throw err;
+      }
+
+      res.json({ message: 'Active version deleted, previous version promoted' });
       return;
     }
 
