@@ -80,18 +80,20 @@ router.post('/enrich-all', requireAuth('write', 'admin'), async (req, res) => {
   try {
     const limitParam = Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit || '100';
     const fileTypeParam = Array.isArray(req.query.file_type) ? req.query.file_type[0] : req.query.file_type;
+    const forceParam = req.query.force === 'true' || req.query.force === '1';
     const parsedLimit = Math.max(1, Math.min(Number(limitParam) || 100, 1000));
 
-    // Get unenriched attachments
+    // Get attachments to enrich (force=true includes already-summarized ones)
+    const summaryFilter = forceParam ? '' : 'AND summary_text IS NULL';
     const query = fileTypeParam
       ? `SELECT record_id, storage_path, mime_type, file_type, original_file_name
          FROM current_attachments
-         WHERE summary_text IS NULL AND file_type = $1
+         WHERE file_type = $1 ${summaryFilter}
          AND storage_path LIKE '/memory/attachments/%'
          LIMIT $2`
       : `SELECT record_id, storage_path, mime_type, file_type, original_file_name
          FROM current_attachments
-         WHERE summary_text IS NULL
+         WHERE TRUE ${summaryFilter}
          AND storage_path LIKE '/memory/attachments/%'
          LIMIT $1`;
 

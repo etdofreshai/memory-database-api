@@ -430,25 +430,24 @@ function recordRequest(apiName: 'zai'): void {
  * Build the Z.AI prompt for summarizing an attachment
  */
 function buildZaiPrompt(fileType: string, fileName: string): string {
-  const base = `Analyze this file and provide a structured response with the following sections:
+  const base = `Provide an exhaustive, comprehensive, and extremely detailed description of this file. Leave nothing out.
+
+Include ALL of the following in your response:
 
 Raw Content
-(Extract any readable text, OCR content, or transcript from the file)
+(Extract every single word, number, symbol, and piece of readable text. Include ALL OCR content, watermarks, timestamps, captions, labels, headers, footers, URLs, and any text visible anywhere in the file. Transcribe everything verbatim.)
 
 Title
 (A concise descriptive title)
 
 Summary
-(A 2-3 sentence summary of the content)
-
-File Description
-(What kind of file this is and what it contains)
+(A thorough, in-depth description with no length limit. Describe every element, every detail, every object, person, color, texture, background, foreground, position, expression, lighting, composition. If it's a document, describe the layout, formatting, sections, and structure. If it's a photo, describe the scene as if explaining it to someone who cannot see it. Be exhaustive — more detail is always better.)
 
 Tags
-(Comma-separated relevant tags/labels)`;
+(Comma-separated relevant tags/labels — be generous, include specific and general tags)`;
 
   if (fileType === 'audio') {
-    return `This is an audio file (${fileName}). Please transcribe the audio content first, then summarize it.\n\n${base}`;
+    return `This is an audio file (${fileName}). Transcribe every word of audio content verbatim. Include speaker identification if possible, timestamps, tone, background noises, music, and any non-speech audio. Then describe the content thoroughly.\n\n${base}`;
   }
   return base;
 }
@@ -940,28 +939,69 @@ async function storeEnrichmentResults(recordId: string, data: any): Promise<void
 
   const model = metadata?.model || metadata?.analyzed_by || 'unknown';
   const now = new Date().toISOString();
+  const labelsJson = JSON.stringify(Array.isArray(labels) ? labels : []);
+  const metadataJson = JSON.stringify(metadata);
 
-  // Update attachment with enrichment results
-  await pool.query(
-    `UPDATE attachments
-     SET summary_text = COALESCE($1, summary_text),
-         summary_model = $7,
-         summary_updated_at = $5,
-         ocr_text = COALESCE($2, ocr_text),
-         labels = $3::jsonb,
-         metadata = jsonb_set(COALESCE(metadata, '{}'), '{enrichment_metadata}', $4::jsonb),
-         updated_at = $5
-     WHERE record_id = $6::uuid AND is_active = true`,
-    [
-      summary,
-      ocr_text,
-      JSON.stringify(Array.isArray(labels) ? labels : []),
-      JSON.stringify(metadata),
-      now,
-      recordId,
-      model,
-    ]
+  // Check if this attachment already has a summary (re-enrichment = SCD Type 2)
+  const existing = await pool.query(
+    `SELECT id, summary_text FROM attachments WHERE record_id = $1::uuid AND is_active = TRUE`,
+    [recordId]
   );
+
+  if (existing.rows.length > 0 && existing.rows[0].summary_text) {
+    // SCD Type 2: close old row, insert new version
+    console.log(`[store] SCD Type 2: creating new version for ${recordId} (previous summary exists)`);
+    
+    await pool.query('BEGIN');
+    try {
+      // Close the old row
+      await pool.query(
+        `UPDATE attachments SET effective_to = NOW(), is_active = FALSE, updated_at = NOW()
+         WHERE record_id = $1::uuid AND is_active = TRUE`,
+        [recordId]
+      );
+
+      // Insert new row with same record_id but new enrichment data
+      await pool.query(
+        `INSERT INTO attachments (
+          record_id, sha256, size_bytes, mime_type, file_type, original_file_name,
+          created_at_source, storage_provider, storage_path, url_local,
+          url_fallback_1, url_fallback_2, url_fallback_3, privacy_level,
+          summary_text, summary_model, summary_updated_at,
+          labels, ocr_text, metadata, embedding_input,
+          effective_from, is_active
+        )
+        SELECT 
+          record_id, sha256, size_bytes, mime_type, file_type, original_file_name,
+          created_at_source, storage_provider, storage_path, url_local,
+          url_fallback_1, url_fallback_2, url_fallback_3, privacy_level,
+          $2, $3, NOW(),
+          $4::jsonb, $5, jsonb_set(COALESCE(metadata, '{}'), '{enrichment_metadata}', $6::jsonb), embedding_input,
+          NOW(), TRUE
+        FROM attachments WHERE id = $1`,
+        [existing.rows[0].id, summary, model, labelsJson, ocr_text, metadataJson]
+      );
+
+      await pool.query('COMMIT');
+    } catch (err) {
+      await pool.query('ROLLBACK');
+      throw err;
+    }
+  } else {
+    // First enrichment: simple update
+    await pool.query(
+      `UPDATE attachments
+       SET summary_text = COALESCE($1, summary_text),
+           summary_model = $7,
+           summary_updated_at = $5,
+           ocr_text = COALESCE($2, ocr_text),
+           labels = $3::jsonb,
+           metadata = jsonb_set(COALESCE(metadata, '{}'), '{enrichment_metadata}', $4::jsonb),
+           updated_at = $5
+       WHERE record_id = $6::uuid AND is_active = true`,
+      [summary, ocr_text, labelsJson, metadataJson, now, recordId, model]
+    );
+  }
 }
 
 /**

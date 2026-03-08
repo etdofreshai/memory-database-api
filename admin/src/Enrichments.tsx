@@ -57,6 +57,7 @@ export default function Enrichments() {
   const [actionLoading, setActionLoading] = useState('');
   const [unsummarizedCount, setUnsummarizedCount] = useState<number | null>(null);
   const [backfillLimit, setBackfillLimit] = useState('100');
+  const [forceReenrich, setForceReenrich] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [concurrencyInput, setConcurrencyInput] = useState('5');
   const [incrementInput, setIncrementInput] = useState('1');
@@ -120,7 +121,8 @@ export default function Enrichments() {
     try {
       setActionLoading('backfill');
       const limit = Math.max(1, Math.min(Number(backfillLimit) || 100, 1000));
-      const res = await fetch(`${BASE}/api/enrichments/enrich-all?limit=${limit}`, { method: 'POST', headers });
+      const forceQ = forceReenrich ? '&force=true' : '';
+      const res = await fetch(`${BASE}/api/enrichments/enrich-all?limit=${limit}${forceQ}`, { method: 'POST', headers });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || 'Failed');
       showToast(`Queued ${data.queued} attachments (${data.failed} failed)`, data.failed > 0 ? 'error' : 'success');
@@ -414,10 +416,16 @@ export default function Enrichments() {
             {actionLoading === 'retry' ? '⏳…' : '🔄 Retry Failed'}
           </button>
         </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-          <input type="checkbox" checked={isPolling} onChange={e => setIsPolling(e.target.checked)} />
-          Auto-refresh every 4 seconds
-        </label>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={forceReenrich} onChange={e => setForceReenrich(e.target.checked)} />
+            🔄 Force re-enrich (regenerate existing summaries — creates new version)
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={isPolling} onChange={e => setIsPolling(e.target.checked)} />
+            Auto-refresh every 4 seconds
+          </label>
+        </div>
       </div>
     </div>
   );
