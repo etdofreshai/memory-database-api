@@ -9,7 +9,7 @@ import { EventEmitter } from 'events';
  */
 
 const MCP_INIT_TIMEOUT_MS = 30_000;
-const MCP_CALL_TIMEOUT_MS = 120_000;
+const MCP_CALL_TIMEOUT_MS = 300_000; // 5 minutes — Z.AI vision can take 90-120s, needs headroom
 const MCP_IDLE_TIMEOUT_MS = 5 * 60_000; // Kill server after 5 min idle
 
 interface JsonRpcRequest {
