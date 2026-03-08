@@ -334,7 +334,15 @@ function recordSuccess() {
 
 function isRateLimitError(err: any): boolean {
   const msg = err?.message || '';
-  return msg.includes('429') || msg.includes('rate limit') || msg.includes('Rate limit') || msg.includes('Too Many Requests');
+  return msg.includes('429') || msg.includes('1302') || msg.includes('rate limit') || msg.includes('Rate limit') || msg.includes('Too Many Requests');
+}
+
+/** Check if a string looks like an error message (not a real summary) */
+function isErrorSummary(text: string): boolean {
+  if (!text) return false;
+  return text.startsWith('Error:') || text.startsWith('Unexpected error:') ||
+    text.includes('HTTP 429') || text.includes('rate limit reached') ||
+    text.includes('analysis failed:') || text.includes('MCP error');
 }
 
 // Retry config
@@ -923,6 +931,12 @@ async function storeEnrichmentResults(recordId: string, data: any): Promise<void
     labels = [],
     metadata = {},
   } = data;
+
+  // Never save error messages as summaries
+  if (summary && isErrorSummary(summary)) {
+    console.warn(`[store] Refusing to save error message as summary for ${recordId}: ${summary.substring(0, 100)}`);
+    throw new Error(`Enrichment produced error text, not a real summary: ${summary.substring(0, 100)}`);
+  }
 
   const model = metadata?.model || metadata?.analyzed_by || 'unknown';
   const now = new Date().toISOString();
