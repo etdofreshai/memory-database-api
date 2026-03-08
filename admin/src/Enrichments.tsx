@@ -742,6 +742,16 @@ export default function Enrichments() {
                           </span>
                         )}
                       </div>
+
+                      {/* File Metadata */}
+                      {v.metadata?.enrichment_metadata?.file_metadata && Object.keys(v.metadata.enrichment_metadata.file_metadata).length > 0 && (
+                        <details style={{ marginTop: 8 }}>
+                          <summary style={{ fontSize: 12, color: '#888', cursor: 'pointer' }}>📋 File Metadata</summary>
+                          <pre style={{ fontSize: 11, color: '#aaa', background: '#111', padding: 8, borderRadius: 4, marginTop: 4, overflow: 'auto', maxHeight: 200 }}>
+                            {JSON.stringify(v.metadata.enrichment_metadata.file_metadata, null, 2)}
+                          </pre>
+                        </details>
+                      )}
                     </div>
                   );
                 })}

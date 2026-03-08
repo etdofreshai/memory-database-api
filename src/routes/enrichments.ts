@@ -262,7 +262,7 @@ router.get('/history/:record_id', requireAuth('read', 'write', 'admin'), async (
   try {
     const result = await pool.query(
       `SELECT id, record_id, summary_text, summary_model, summary_updated_at, labels, ocr_text,
-              effective_from, effective_to, is_active, created_at
+              metadata, effective_from, effective_to, is_active, created_at
        FROM attachments
        WHERE record_id = $1
        ORDER BY effective_from DESC`,

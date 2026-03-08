@@ -442,35 +442,43 @@ function recordRequest(apiName: 'zai'): void {
 /**
  * Extract file metadata (EXIF for images, ffprobe for audio/video)
  */
-async function extractFileMetadata(filePath: string, fileType: string, mimeType: string): Promise<string> {
+interface FileMetadataResult {
+  text: string;       // Human-readable for prompt
+  structured: Record<string, any>;  // Structured for DB storage
+}
+
+async function extractFileMetadata(filePath: string, fileType: string, mimeType: string): Promise<FileMetadataResult> {
   const metaParts: string[] = [];
+  const structured: Record<string, any> = {};
 
   try {
     if (fileType === 'image' || mimeType?.startsWith('image/')) {
-      // Use sharp to get image metadata (EXIF, dimensions, etc.)
       const meta = await sharp(filePath).metadata();
-      if (meta.width && meta.height) metaParts.push(`Dimensions: ${meta.width}x${meta.height}`);
-      if (meta.format) metaParts.push(`Format: ${meta.format}`);
-      if (meta.space) metaParts.push(`Color space: ${meta.space}`);
-      if (meta.density) metaParts.push(`DPI: ${meta.density}`);
-      if (meta.hasAlpha) metaParts.push(`Has alpha channel: yes`);
+      if (meta.width && meta.height) {
+        metaParts.push(`Dimensions: ${meta.width}x${meta.height}`);
+        structured.width = meta.width;
+        structured.height = meta.height;
+      }
+      if (meta.format) { metaParts.push(`Format: ${meta.format}`); structured.format = meta.format; }
+      if (meta.space) { metaParts.push(`Color space: ${meta.space}`); structured.colorSpace = meta.space; }
+      if (meta.density) { metaParts.push(`DPI: ${meta.density}`); structured.dpi = meta.density; }
+      if (meta.hasAlpha) { metaParts.push(`Has alpha channel: yes`); structured.hasAlpha = true; }
+      if (meta.size) { structured.fileSize = meta.size; }
 
-      // EXIF data
       if (meta.exif) {
         try {
-          // sharp exposes raw EXIF buffer; parse key fields
           const exifStr = meta.exif.toString('utf-8', 0, Math.min(meta.exif.length, 4000));
-          // Extract readable strings from EXIF (camera model, date, GPS, etc.)
           const readableChunks = exifStr.match(/[\x20-\x7E]{4,}/g);
           if (readableChunks && readableChunks.length > 0) {
-            metaParts.push(`EXIF data: ${readableChunks.slice(0, 20).join(', ')}`);
+            const exifData = readableChunks.slice(0, 20);
+            metaParts.push(`EXIF data: ${exifData.join(', ')}`);
+            structured.exif = exifData;
           }
         } catch { /* ignore EXIF parse errors */ }
       }
     }
 
     if (fileType === 'audio' || fileType === 'video' || mimeType?.startsWith('audio/') || mimeType?.startsWith('video/')) {
-      // Use ffprobe for audio/video metadata
       try {
         const result = execSync(
           `ffprobe -v quiet -print_format json -show_format -show_streams "${filePath}"`,
@@ -478,33 +486,52 @@ async function extractFileMetadata(filePath: string, fileType: string, mimeType:
         );
         const probe = JSON.parse(result.toString());
         const fmt = probe.format || {};
-        if (fmt.duration) metaParts.push(`Duration: ${parseFloat(fmt.duration).toFixed(1)}s`);
-        if (fmt.size) metaParts.push(`File size: ${(parseInt(fmt.size) / 1024 / 1024).toFixed(2)}MB`);
-        if (fmt.format_long_name) metaParts.push(`Format: ${fmt.format_long_name}`);
-        if (fmt.bit_rate) metaParts.push(`Bitrate: ${(parseInt(fmt.bit_rate) / 1000).toFixed(0)}kbps`);
-        // Tags (title, artist, album, date, etc.)
+        if (fmt.duration) {
+          const dur = parseFloat(fmt.duration);
+          metaParts.push(`Duration: ${dur.toFixed(1)}s`);
+          structured.duration = dur;
+        }
+        if (fmt.size) {
+          const sizeMb = parseInt(fmt.size) / 1024 / 1024;
+          metaParts.push(`File size: ${sizeMb.toFixed(2)}MB`);
+          structured.fileSize = parseInt(fmt.size);
+        }
+        if (fmt.format_long_name) { metaParts.push(`Format: ${fmt.format_long_name}`); structured.format = fmt.format_long_name; }
+        if (fmt.bit_rate) {
+          const kbps = parseInt(fmt.bit_rate) / 1000;
+          metaParts.push(`Bitrate: ${kbps.toFixed(0)}kbps`);
+          structured.bitrate = parseInt(fmt.bit_rate);
+        }
         if (fmt.tags) {
+          structured.tags = {};
           for (const [key, val] of Object.entries(fmt.tags)) {
             if (typeof val === 'string' && val.trim()) {
               metaParts.push(`${key}: ${val.trim()}`);
+              structured.tags[key] = val.trim();
             }
           }
         }
-        // Stream info
+        const streams: any[] = [];
         for (const stream of (probe.streams || [])) {
           if (stream.codec_type === 'video') {
             metaParts.push(`Video: ${stream.codec_name} ${stream.width}x${stream.height} ${stream.r_frame_rate || ''}`);
+            streams.push({ type: 'video', codec: stream.codec_name, width: stream.width, height: stream.height, fps: stream.r_frame_rate });
           } else if (stream.codec_type === 'audio') {
             metaParts.push(`Audio: ${stream.codec_name} ${stream.sample_rate}Hz ${stream.channels}ch`);
+            streams.push({ type: 'audio', codec: stream.codec_name, sampleRate: parseInt(stream.sample_rate), channels: stream.channels });
           }
         }
+        if (streams.length > 0) structured.streams = streams;
       } catch { /* ffprobe not available or failed */ }
     }
   } catch (err) {
     console.warn(`[metadata] Failed to extract metadata for ${filePath}:`, (err as Error).message);
   }
 
-  return metaParts.length > 0 ? metaParts.join('\n') : '';
+  return {
+    text: metaParts.length > 0 ? metaParts.join('\n') : '',
+    structured: Object.keys(structured).length > 0 ? structured : {},
+  };
 }
 
 /**
@@ -833,8 +860,8 @@ async function enrichWithMcpVision(item: EnrichmentQueueItem): Promise<void> {
   let absolutePath = path.resolve(attachmentPath);
   let cleanup: (() => void) | undefined;
 
-  const metadata = await extractFileMetadata(absolutePath, fileType, mimeType);
-  const prompt = buildZaiPrompt(fileType, fileName, metadata);
+  const fileMeta = await extractFileMetadata(absolutePath, fileType, mimeType);
+  const prompt = buildZaiPrompt(fileType, fileName, fileMeta.text);
   const client = getMcpVisionClient();
 
   let summaryText: string;
@@ -869,12 +896,12 @@ async function enrichWithMcpVision(item: EnrichmentQueueItem): Promise<void> {
       metadata: {
         model: 'glm-4v-mcp',
         analyzed_by: 'zai-mcp-vision',
+        file_metadata: fileMeta.structured,
       },
     };
 
     await storeEnrichmentResults(recordId, enrichmentData);
   } finally {
-    // Cleanup temp resized file if created
     if (cleanup) {
       cleanup();
     }
@@ -887,8 +914,8 @@ async function enrichWithMcpVision(item: EnrichmentQueueItem): Promise<void> {
 async function enrichWithZaiDirect(item: EnrichmentQueueItem): Promise<void> {
   const { recordId, attachmentPath, mimeType, fileType, fileName } = item;
 
-  const metadata = await extractFileMetadata(attachmentPath, fileType, mimeType);
-  const prompt = buildZaiPrompt(fileType, fileName, metadata);
+  const fileMeta = await extractFileMetadata(attachmentPath, fileType, mimeType);
+  const prompt = buildZaiPrompt(fileType, fileName, fileMeta.text);
   let userContent: any[];
 
   // For text-based files, read as text and send as plain text message
@@ -973,6 +1000,7 @@ async function enrichWithZaiDirect(item: EnrichmentQueueItem): Promise<void> {
       model: modelUsed,
       analyzed_by: 'zai-glm-direct',
       zai_usage: result?.usage || null,
+      file_metadata: fileMeta.structured,
     },
   };
 
