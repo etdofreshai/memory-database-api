@@ -348,16 +348,16 @@ function isErrorSummary(text: string): boolean {
 // Retry config
 // Retry backoff schedule: 5s, 10s, 15s, 30s, 1m, 5m, 10m, 15m, 30m, 1h (stop after ~2h total)
 const RETRY_BACKOFF_MS = [
-  5_000,      // 5 seconds
-  10_000,     // 10 seconds
-  15_000,     // 15 seconds
-  30_000,     // 30 seconds
-  60_000,     // 1 minute
-  300_000,    // 5 minutes
-  600_000,    // 10 minutes
-  900_000,    // 15 minutes
-  1_800_000,  // 30 minutes
-  3_600_000,  // 1 hour
+  5_000,        // 5 seconds
+  15_000,       // 15 seconds
+  30_000,       // 30 seconds
+  60_000,       // 1 minute
+  300_000,      // 5 minutes
+  600_000,      // 10 minutes
+  900_000,      // 15 minutes
+  1_800_000,    // 30 minutes
+  3_600_000,    // 1 hour
+  18_000_000,   // 5 hours
 ];
 const MAX_RETRIES = RETRY_BACKOFF_MS.length;
 
