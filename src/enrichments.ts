@@ -440,16 +440,86 @@ function recordRequest(apiName: 'zai'): void {
 }
 
 /**
+ * Extract file metadata (EXIF for images, ffprobe for audio/video)
+ */
+async function extractFileMetadata(filePath: string, fileType: string, mimeType: string): Promise<string> {
+  const metaParts: string[] = [];
+
+  try {
+    if (fileType === 'image' || mimeType?.startsWith('image/')) {
+      // Use sharp to get image metadata (EXIF, dimensions, etc.)
+      const meta = await sharp(filePath).metadata();
+      if (meta.width && meta.height) metaParts.push(`Dimensions: ${meta.width}x${meta.height}`);
+      if (meta.format) metaParts.push(`Format: ${meta.format}`);
+      if (meta.space) metaParts.push(`Color space: ${meta.space}`);
+      if (meta.density) metaParts.push(`DPI: ${meta.density}`);
+      if (meta.hasAlpha) metaParts.push(`Has alpha channel: yes`);
+
+      // EXIF data
+      if (meta.exif) {
+        try {
+          // sharp exposes raw EXIF buffer; parse key fields
+          const exifStr = meta.exif.toString('utf-8', 0, Math.min(meta.exif.length, 4000));
+          // Extract readable strings from EXIF (camera model, date, GPS, etc.)
+          const readableChunks = exifStr.match(/[\x20-\x7E]{4,}/g);
+          if (readableChunks && readableChunks.length > 0) {
+            metaParts.push(`EXIF data: ${readableChunks.slice(0, 20).join(', ')}`);
+          }
+        } catch { /* ignore EXIF parse errors */ }
+      }
+    }
+
+    if (fileType === 'audio' || fileType === 'video' || mimeType?.startsWith('audio/') || mimeType?.startsWith('video/')) {
+      // Use ffprobe for audio/video metadata
+      try {
+        const result = execSync(
+          `ffprobe -v quiet -print_format json -show_format -show_streams "${filePath}"`,
+          { timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        const probe = JSON.parse(result.toString());
+        const fmt = probe.format || {};
+        if (fmt.duration) metaParts.push(`Duration: ${parseFloat(fmt.duration).toFixed(1)}s`);
+        if (fmt.size) metaParts.push(`File size: ${(parseInt(fmt.size) / 1024 / 1024).toFixed(2)}MB`);
+        if (fmt.format_long_name) metaParts.push(`Format: ${fmt.format_long_name}`);
+        if (fmt.bit_rate) metaParts.push(`Bitrate: ${(parseInt(fmt.bit_rate) / 1000).toFixed(0)}kbps`);
+        // Tags (title, artist, album, date, etc.)
+        if (fmt.tags) {
+          for (const [key, val] of Object.entries(fmt.tags)) {
+            if (typeof val === 'string' && val.trim()) {
+              metaParts.push(`${key}: ${val.trim()}`);
+            }
+          }
+        }
+        // Stream info
+        for (const stream of (probe.streams || [])) {
+          if (stream.codec_type === 'video') {
+            metaParts.push(`Video: ${stream.codec_name} ${stream.width}x${stream.height} ${stream.r_frame_rate || ''}`);
+          } else if (stream.codec_type === 'audio') {
+            metaParts.push(`Audio: ${stream.codec_name} ${stream.sample_rate}Hz ${stream.channels}ch`);
+          }
+        }
+      } catch { /* ffprobe not available or failed */ }
+    }
+  } catch (err) {
+    console.warn(`[metadata] Failed to extract metadata for ${filePath}:`, (err as Error).message);
+  }
+
+  return metaParts.length > 0 ? metaParts.join('\n') : '';
+}
+
+/**
  * Build the Z.AI prompt for summarizing an attachment
  */
-function buildZaiPrompt(fileType: string, fileName: string): string {
-  const base = `Provide an exhaustive, comprehensive, and extremely detailed description of this file. Leave nothing out.
+function buildZaiPrompt(fileType: string, fileName: string, metadata?: string): string {
+  const metaSection = metadata ? `\n\nFile Metadata:\n${metadata}\n` : '';
+
+  const base = `Provide an exhaustive, comprehensive, and extremely detailed description of this file. Leave nothing out.${metaSection}
 
 Title
 (A concise descriptive title)
 
 Comprehensive Description
-(A thorough, in-depth description with no length limit. Describe every element, every detail, every object, person, color, texture, background, foreground, position, expression, lighting, composition. Include any readable text, OCR content, watermarks, timestamps, captions, labels, headers, footers, URLs visible in the file. If it's a document, describe the layout, formatting, sections, and structure. If it's a photo, describe the scene as if explaining it to someone who cannot see it. Be exhaustive — more detail is always better.)
+(A thorough, in-depth description with no length limit. Describe every element, every detail, every object, person, color, texture, background, foreground, position, expression, lighting, composition. Include any readable text, OCR content, watermarks, timestamps, captions, labels, headers, footers, URLs visible in the file. If it's a document, describe the layout, formatting, sections, and structure. If it's a photo, describe the scene as if explaining it to someone who cannot see it. Be exhaustive — more detail is always better. Incorporate any file metadata provided above into your description.)
 
 Tags
 (Comma-separated relevant tags/labels — be generous, include specific and general tags)`;
@@ -759,11 +829,12 @@ ${allPageContent}`;
 }
 
 async function enrichWithMcpVision(item: EnrichmentQueueItem): Promise<void> {
-  const { recordId, attachmentPath, fileType, fileName } = item;
+  const { recordId, attachmentPath, mimeType, fileType, fileName } = item;
   let absolutePath = path.resolve(attachmentPath);
   let cleanup: (() => void) | undefined;
 
-  const prompt = buildZaiPrompt(fileType, fileName);
+  const metadata = await extractFileMetadata(absolutePath, fileType, mimeType);
+  const prompt = buildZaiPrompt(fileType, fileName, metadata);
   const client = getMcpVisionClient();
 
   let summaryText: string;
@@ -816,7 +887,8 @@ async function enrichWithMcpVision(item: EnrichmentQueueItem): Promise<void> {
 async function enrichWithZaiDirect(item: EnrichmentQueueItem): Promise<void> {
   const { recordId, attachmentPath, mimeType, fileType, fileName } = item;
 
-  const prompt = buildZaiPrompt(fileType, fileName);
+  const metadata = await extractFileMetadata(attachmentPath, fileType, mimeType);
+  const prompt = buildZaiPrompt(fileType, fileName, metadata);
   let userContent: any[];
 
   // For text-based files, read as text and send as plain text message
