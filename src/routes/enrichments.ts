@@ -238,7 +238,7 @@ router.get('/recent-summaries', requireAuth('read', 'write', 'admin'), async (re
   try {
     const limit = Math.min(Number(req.query.limit) || 20, 50);
     const result = await pool.query(
-      `SELECT record_id, original_file_name, file_type, mime_type, summary_text, summary_model, summary_updated_at
+      `SELECT record_id, original_file_name, file_type, mime_type, summary_text, summary_model, summary_updated_at, metadata
        FROM current_attachments
        WHERE summary_text IS NOT NULL AND summary_updated_at IS NOT NULL
        ORDER BY summary_updated_at DESC

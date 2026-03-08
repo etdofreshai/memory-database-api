@@ -84,7 +84,7 @@ export default function Enrichments() {
   const [backfillLimit, setBackfillLimit] = useState('100');
   const [forceReenrich, setForceReenrich] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [recentSummaries, setRecentSummaries] = useState<Array<{ record_id: string; original_file_name: string; summary_text: string; summary_model: string; summary_updated_at: string; file_type: string; mime_type?: string }>>([]);
+  const [recentSummaries, setRecentSummaries] = useState<Array<{ record_id: string; original_file_name: string; summary_text: string; summary_model: string; summary_updated_at: string; file_type: string; mime_type?: string; metadata?: any }>>([]);
   const [historyRecordId, setHistoryRecordId] = useState<string | null>(null);
   const [historyVersions, setHistoryVersions] = useState<HistoryVersion[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -653,6 +653,14 @@ export default function Enrichments() {
                   <p style={{ margin: 0, fontSize: 13, color: '#ccc', whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto' }}>
                     {s.summary_text}
                   </p>
+                  {s.metadata?.enrichment_metadata?.file_metadata && Object.keys(s.metadata.enrichment_metadata.file_metadata).length > 0 && (
+                    <details style={{ marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
+                      <summary style={{ fontSize: 11, color: '#888', cursor: 'pointer' }}>📋 File Metadata</summary>
+                      <pre style={{ fontSize: 11, color: '#aaa', background: '#111', padding: 6, borderRadius: 4, marginTop: 4, overflow: 'auto', maxHeight: 150 }}>
+                        {JSON.stringify(s.metadata.enrichment_metadata.file_metadata, null, 2)}
+                      </pre>
+                    </details>
+                  )}
                 </div>
               </div>
             ))}
