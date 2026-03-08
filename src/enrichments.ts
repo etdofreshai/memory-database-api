@@ -1117,6 +1117,17 @@ export function getQueueStatus() {
   };
 }
 
+export function getQueueItems() {
+  return queue.slice(0, 50).map(item => ({
+    recordId: item.recordId,
+    fileName: item.fileName,
+    fileType: item.fileType,
+    retries: item.retries,
+    enrichmentType: item.enrichmentType,
+    createdAt: item.createdAt,
+  }));
+}
+
 /**
  * Retry dead letter items
  */

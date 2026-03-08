@@ -43,6 +43,15 @@ interface QueueStatus {
   }>;
 }
 
+interface QueueItem {
+  recordId: string;
+  fileName: string;
+  fileType: string;
+  retries: number;
+  enrichmentType: string;
+  createdAt: number;
+}
+
 const BASE = import.meta.env.BASE_URL.replace(/\/admin\/?$/, '');
 
 function Toast({ message, type, onClose }: { message: string; type: 'success' | 'error' | 'info'; onClose: () => void }) {
@@ -66,6 +75,7 @@ export default function Enrichments() {
   const [token, setToken] = useState(localStorage.getItem('admin_token') || '');
   const [tokenInput, setTokenInput] = useState(localStorage.getItem('admin_token') || '');
   const [status, setStatus] = useState<QueueStatus | null>(null);
+  const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [isPolling, setIsPolling] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -133,6 +143,27 @@ export default function Enrichments() {
     } catch {}
   }
 
+  async function loadQueueItems() {
+    if (!token) return;
+    try {
+      const res = await fetch(`${BASE}/api/enrichments/queue-items`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setQueueItems(data.items || []);
+      }
+    } catch {}
+  }
+
+  function formatRelativeTime(ts: number) {
+    const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  }
 
   async function loadHistory(recordId: string) {
     if (!token) return;
@@ -207,6 +238,7 @@ export default function Enrichments() {
     loadStatus();
     loadUnsummarizedCount();
     loadRecentSummaries();
+    loadQueueItems();
   }, [token]);
 
   useEffect(() => {
@@ -215,26 +247,45 @@ export default function Enrichments() {
       loadStatus();
       loadUnsummarizedCount();
       loadRecentSummaries();
+      loadQueueItems();
     }, 4000);
     return () => clearInterval(timer);
   }, [isPolling, token]);
 
   async function startBackfill() {
     if (!token) return;
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
     try {
       setActionLoading('backfill');
       const limit = Math.max(1, Math.min(Number(backfillLimit) || 100, 1000));
       const forceQ = forceReenrich ? '&force=true' : '';
-      const res = await fetch(`${BASE}/api/enrichments/enrich-all?limit=${limit}${forceQ}`, { method: 'POST', headers });
+      const res = await fetch(`${BASE}/api/enrichments/enrich-all?limit=${limit}${forceQ}`, {
+        method: 'POST',
+        headers,
+        signal: controller.signal,
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || 'Failed');
       showToast(`Queued ${data.queued} attachments (${data.failed} failed)`, data.failed > 0 ? 'error' : 'success');
       setIsPolling(true);
       await loadStatus();
       await loadUnsummarizedCount();
+      await loadQueueItems();
     } catch (err: any) {
-      showToast(err?.message || 'Failed', 'error');
+      if (err?.name === 'AbortError') {
+        showToast('Backfill start timed out after 10 seconds. Please check queue status.', 'error');
+      } else {
+        showToast(err?.message || 'Failed', 'error');
+      }
     } finally {
+      clearTimeout(timeout);
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < 500) {
+        await new Promise(resolve => setTimeout(resolve, 500 - elapsed));
+      }
       setActionLoading('');
     }
   }
@@ -249,6 +300,7 @@ export default function Enrichments() {
       showToast(`Retried ${data.retried} items`, 'success');
       setIsPolling(true);
       await loadStatus();
+      await loadQueueItems();
     } catch (err: any) {
       showToast(err?.message || 'Failed', 'error');
     } finally {
@@ -266,6 +318,7 @@ export default function Enrichments() {
       if (!res.ok) throw new Error(data?.error || 'Failed');
       showToast(data.message, 'info');
       await loadStatus();
+      await loadQueueItems();
     } catch (err: any) {
       showToast(err?.message || 'Failed', 'error');
     } finally {
@@ -282,6 +335,7 @@ export default function Enrichments() {
       if (!res.ok) throw new Error(data?.error || 'Failed');
       showToast(`Cancelled ${data.cancelled} pending items`, 'info');
       await loadStatus();
+      await loadQueueItems();
     } catch (err: any) {
       showToast(err?.message || 'Failed', 'error');
     } finally {
@@ -310,7 +364,7 @@ export default function Enrichments() {
         <input placeholder="Admin token" type="password" value={tokenInput}
           onChange={e => setTokenInput(e.target.value)} style={{ width: 320 }} />
         <button onClick={saveToken}>Connect</button>
-        <button onClick={() => { loadStatus(); loadUnsummarizedCount(); }} disabled={loading}>Refresh</button>
+        <button onClick={() => { loadStatus(); loadUnsummarizedCount(); loadQueueItems(); }} disabled={loading}>Refresh</button>
       </div>
 
       {error && <p style={{ color: '#ff6b6b' }}>{error}</p>}
@@ -495,6 +549,35 @@ export default function Enrichments() {
         </div>
       )}
 
+      {/* Queue */}
+      {status && status.pending > 0 && queueItems.length > 0 && (
+        <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 14, marginBottom: 16 }}>
+          <h2 style={{ marginTop: 0 }}>📋 Queue ({status.pending})</h2>
+          <div style={{ maxHeight: 300, overflow: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Filename</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Type</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Retries</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 6 }}>Queued At</th>
+                </tr>
+              </thead>
+              <tbody>
+                {queueItems.map((item, i) => (
+                  <tr key={`${item.recordId}-${i}`}>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 6, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.fileName}</td>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{item.fileType}</td>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 6 }}>{item.retries}</td>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 6, color: '#888' }}>{formatRelativeTime(item.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Controls */}
       <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 14, marginBottom: 16 }}>
         <h2 style={{ marginTop: 0 }}>🎮 Controls</h2>
@@ -502,27 +585,27 @@ export default function Enrichments() {
           <input type="number" min="1" max="1000" value={backfillLimit}
             onChange={e => setBackfillLimit(e.target.value)}
             style={{ width: 80 }} placeholder="Limit" title="Max attachments to enqueue" />
-          <button onClick={startBackfill} disabled={!!actionLoading}
-            style={{ background: '#4caf50', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', opacity: actionLoading ? 0.6 : 1 }}>
+          <button onClick={startBackfill} disabled={actionLoading === 'backfill'}
+            style={{ background: '#4caf50', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', opacity: actionLoading === 'backfill' ? 0.6 : 1 }}>
             {actionLoading === 'backfill' ? '⏳ Starting…' : '▶️ Start Backfill'}
           </button>
-          <button onClick={togglePause} disabled={!!actionLoading}
-            style={{ background: status?.paused ? '#2196f3' : '#ff9800', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', opacity: actionLoading ? 0.6 : 1 }}>
+          <button onClick={togglePause}
+            style={{ background: status?.paused ? '#2196f3' : '#ff9800', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', opacity: 1 }}>
             {actionLoading === 'pause' ? '⏳…' : status?.paused ? '▶️ Resume' : '⏸ Pause'}
           </button>
-          <button onClick={cancelPending} disabled={!!actionLoading || (status?.pending === 0)}
-            style={{ background: '#f44336', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', opacity: (actionLoading || status?.pending === 0) ? 0.6 : 1 }}>
+          <button onClick={cancelPending} disabled={status?.pending === 0}
+            style={{ background: '#f44336', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', opacity: status?.pending === 0 ? 0.6 : 1 }}>
             {actionLoading === 'cancel' ? '⏳…' : '🛑 Cancel Pending'}
           </button>
-          <button onClick={retryFailed} disabled={!!actionLoading || (status && status.deadLetterCount === 0)}
-            style={{ background: '#ff9800', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', opacity: (actionLoading || (status && status.deadLetterCount === 0)) ? 0.6 : 1 }}>
+          <button onClick={retryFailed} disabled={!!(status && status.deadLetterCount === 0)}
+            style={{ background: '#ff9800', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', opacity: (status && status.deadLetterCount === 0) ? 0.6 : 1 }}>
             {actionLoading === 'retry' ? '⏳…' : '🔄 Retry Failed'}
           </button>
         </div>
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
             <input type="checkbox" checked={forceReenrich} onChange={e => setForceReenrich(e.target.checked)} />
-            🔄 Force re-enrich (regenerate existing summaries — creates new version)
+            🔄 Force re-enrich (overwrites existing summaries)
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
             <input type="checkbox" checked={isPolling} onChange={e => setIsPolling(e.target.checked)} />

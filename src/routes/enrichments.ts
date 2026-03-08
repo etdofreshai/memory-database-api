@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import pool from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
-import { queueEnrichment, getQueueStatus, retryDeadLetters, pauseQueue, resumeQueue, cancelPending, isPaused, updateAdaptiveSettings } from '../enrichments.js';
+import { queueEnrichment, getQueueStatus, getQueueItems, retryDeadLetters, pauseQueue, resumeQueue, cancelPending, isPaused, updateAdaptiveSettings } from '../enrichments.js';
 
 const router = Router();
 
@@ -14,6 +14,19 @@ router.get('/queue-status', requireAuth('read', 'write', 'admin'), async (req, r
   try {
     const status = getQueueStatus();
     res.json(status);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/enrichments/queue-items
+ * Get first 50 currently queued items
+ */
+router.get('/queue-items', requireAuth('read', 'write', 'admin'), async (_req, res) => {
+  try {
+    const items = getQueueItems();
+    res.json({ items });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
