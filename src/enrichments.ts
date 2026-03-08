@@ -938,66 +938,19 @@ async function storeEnrichmentResults(recordId: string, data: any): Promise<void
   const labelsJson = JSON.stringify(Array.isArray(labels) ? labels : []);
   const metadataJson = JSON.stringify(metadata);
 
-  // Check if this attachment already has a summary (re-enrichment = SCD Type 2)
-  const existing = await pool.query(
-    `SELECT id, summary_text FROM attachments WHERE record_id = $1::uuid AND is_active = TRUE`,
-    [recordId]
+  // Simple update in place (overwrite existing summary if re-enriching)
+  await pool.query(
+    `UPDATE attachments
+     SET summary_text = $1,
+         summary_model = $7,
+         summary_updated_at = $5,
+         ocr_text = COALESCE($2, ocr_text),
+         labels = $3::jsonb,
+         metadata = jsonb_set(COALESCE(metadata, '{}'), '{enrichment_metadata}', $4::jsonb),
+         updated_at = $5
+     WHERE record_id = $6::uuid AND is_active = true`,
+    [summary, ocr_text, labelsJson, metadataJson, now, recordId, model]
   );
-
-  if (existing.rows.length > 0 && existing.rows[0].summary_text) {
-    // SCD Type 2: close old row, insert new version
-    console.log(`[store] SCD Type 2: creating new version for ${recordId} (previous summary exists)`);
-    
-    await pool.query('BEGIN');
-    try {
-      // Close the old row
-      await pool.query(
-        `UPDATE attachments SET effective_to = NOW(), is_active = FALSE, updated_at = NOW()
-         WHERE record_id = $1::uuid AND is_active = TRUE`,
-        [recordId]
-      );
-
-      // Insert new row with same record_id but new enrichment data
-      await pool.query(
-        `INSERT INTO attachments (
-          record_id, sha256, size_bytes, mime_type, file_type, original_file_name,
-          created_at_source, storage_provider, storage_path, url_local,
-          url_fallback_1, url_fallback_2, url_fallback_3, privacy_level,
-          summary_text, summary_model, summary_updated_at,
-          labels, ocr_text, metadata, embedding_input,
-          effective_from, is_active
-        )
-        SELECT 
-          record_id, sha256, size_bytes, mime_type, file_type, original_file_name,
-          created_at_source, storage_provider, storage_path, url_local,
-          url_fallback_1, url_fallback_2, url_fallback_3, privacy_level,
-          $2, $3, NOW(),
-          $4::jsonb, $5, jsonb_set(COALESCE(metadata, '{}'), '{enrichment_metadata}', $6::jsonb), embedding_input,
-          NOW(), TRUE
-        FROM attachments WHERE id = $1`,
-        [existing.rows[0].id, summary, model, labelsJson, ocr_text, metadataJson]
-      );
-
-      await pool.query('COMMIT');
-    } catch (err) {
-      await pool.query('ROLLBACK');
-      throw err;
-    }
-  } else {
-    // First enrichment: simple update
-    await pool.query(
-      `UPDATE attachments
-       SET summary_text = COALESCE($1, summary_text),
-           summary_model = $7,
-           summary_updated_at = $5,
-           ocr_text = COALESCE($2, ocr_text),
-           labels = $3::jsonb,
-           metadata = jsonb_set(COALESCE(metadata, '{}'), '{enrichment_metadata}', $4::jsonb),
-           updated_at = $5
-       WHERE record_id = $6::uuid AND is_active = true`,
-      [summary, ocr_text, labelsJson, metadataJson, now, recordId, model]
-    );
-  }
 }
 
 /**
