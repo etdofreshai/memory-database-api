@@ -432,16 +432,11 @@ function recordRequest(apiName: 'zai'): void {
 function buildZaiPrompt(fileType: string, fileName: string): string {
   const base = `Provide an exhaustive, comprehensive, and extremely detailed description of this file. Leave nothing out.
 
-Include ALL of the following in your response:
-
-Raw Content
-(Extract every single word, number, symbol, and piece of readable text. Include ALL OCR content, watermarks, timestamps, captions, labels, headers, footers, URLs, and any text visible anywhere in the file. Transcribe everything verbatim.)
-
 Title
 (A concise descriptive title)
 
-Summary
-(A thorough, in-depth description with no length limit. Describe every element, every detail, every object, person, color, texture, background, foreground, position, expression, lighting, composition. If it's a document, describe the layout, formatting, sections, and structure. If it's a photo, describe the scene as if explaining it to someone who cannot see it. Be exhaustive — more detail is always better.)
+Comprehensive Description
+(A thorough, in-depth description with no length limit. Describe every element, every detail, every object, person, color, texture, background, foreground, position, expression, lighting, composition. Include any readable text, OCR content, watermarks, timestamps, captions, labels, headers, footers, URLs visible in the file. If it's a document, describe the layout, formatting, sections, and structure. If it's a photo, describe the scene as if explaining it to someone who cannot see it. Be exhaustive — more detail is always better.)
 
 Tags
 (Comma-separated relevant tags/labels — be generous, include specific and general tags)`;
@@ -908,7 +903,8 @@ function parseStructuredSummary(text: string): {
   title: string; summary: string; tags: string[]; rawContent: string;
 } {
   const titleMatch = text.match(/Title\n(.+)/);
-  const summaryMatch = text.match(/Summary\n([\s\S]*?)(?:\n\n(?:File Description|Tags)|$)/);
+  // Match both old "Summary" and new "Comprehensive Description" section names
+  const summaryMatch = text.match(/(?:Comprehensive Description|Summary)\n([\s\S]*?)(?:\n\n(?:File Description|Tags)|$)/);
   const tagsMatch = text.match(/Tags\n(.+)/);
   const rawContentMatch = text.match(/Raw Content\n([\s\S]*?)(?:\n\nTitle|$)/);
 
