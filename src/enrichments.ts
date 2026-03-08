@@ -688,7 +688,7 @@ ${allPageContent}`;
           body: JSON.stringify({
             model: Z_AI_MODEL,
             messages: [{ role: 'user', content: combinePrompt }],
-            max_tokens: 2048,
+            max_tokens: 8192,
           }),
         });
 
@@ -850,7 +850,7 @@ async function enrichWithZaiDirect(item: EnrichmentQueueItem): Promise<void> {
     body: JSON.stringify({
       model: Z_AI_MODEL,
       messages: [{ role: 'user', content: userContent }],
-      max_tokens: 2048,
+      max_tokens: 8192,
     }),
   });
 
