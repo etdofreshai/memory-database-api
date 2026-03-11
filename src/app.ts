@@ -11,6 +11,7 @@ import attachmentsRouter from './routes/attachments.js';
 import linksRouter from './routes/links.js';
 import enrichmentsRouter from './routes/enrichments.js';
 import cleanupRouter from './routes/cleanup.js';
+import discordChannelsRouter from './routes/discord-channels.js';
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use('/api/attachments', attachmentsRouter);
 app.use('/api/enrichments', enrichmentsRouter);
 app.use('/api/links', linksRouter);
 app.use('/api/cleanup', cleanupRouter);
+app.use('/api/discord/channels', discordChannelsRouter);
 
 export { app };
 export default app;

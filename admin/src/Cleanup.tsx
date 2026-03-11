@@ -6,7 +6,7 @@ interface Stats {
   total_messages: number;
   total_attachments: number;
   sources: { source_id: number; source_name: string; count: number; attachment_count: number }[];
-  channels: { source_name: string; source_id: number; channel: string; count: number; attachment_count: number }[];
+  channels: { source_name: string; source_id: number; channel: string; count: number; attachment_count: number; display_name?: string; discord_channel_name?: string; discord_guild_name?: string }[];
   senders: { sender: string; count: number; attachment_count: number }[];
   date_buckets: { month: string; count: number }[];
 }
@@ -252,7 +252,7 @@ export default function Cleanup() {
                 <thead>
                   <tr>
                     <SortableHeader label="Source" sortKey="source_name" sorts={channelSort} onToggle={k => toggleSort(channelSort, setChannelSort, k)} />
-                    <SortableHeader label="Channel" sortKey="channel" sorts={channelSort} onToggle={k => toggleSort(channelSort, setChannelSort, k)} />
+                    <SortableHeader label="Channel" sortKey="display_name" sorts={channelSort} onToggle={k => toggleSort(channelSort, setChannelSort, k)} />
                     <SortableHeader label="Messages" sortKey="count" sorts={channelSort} onToggle={k => toggleSort(channelSort, setChannelSort, k)} align="right" />
                     <SortableHeader label="Attachments" sortKey="attachment_count" sorts={channelSort} onToggle={k => toggleSort(channelSort, setChannelSort, k)} align="right" />
                   </tr>
@@ -266,7 +266,12 @@ export default function Cleanup() {
                       }}
                     >
                       <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e' }}>{ch.source_name}</td>
-                      <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e' }}>{ch.channel || '—'}</td>
+                      <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e' }} title={ch.channel}>
+                        {ch.display_name || ch.channel || '—'}
+                        {ch.discord_guild_name && !ch.display_name && (
+                          <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>{ch.discord_guild_name}</span>
+                        )}
+                      </td>
                       <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e', textAlign: 'right' }}>{ch.count.toLocaleString()}</td>
                       <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e', textAlign: 'right', color: '#aaa' }}>{ch.attachment_count.toLocaleString()}</td>
                     </tr>

@@ -54,17 +54,27 @@ router.get('/stats', requireAuth('admin'), async (req, res) => {
       ORDER BY count DESC
     `, values);
 
-    // Channel breakdown (recipient field)
+    // Channel breakdown (recipient field) with discord channel name resolution
     const channelsResult = await pool.query(`
       SELECT s.name as source_name, m.source_id, m.recipient as channel,
         COUNT(DISTINCT m.id)::int as count,
-        COUNT(DISTINCT mal.attachment_record_id)::int as attachment_count
+        COUNT(DISTINCT mal.attachment_record_id)::int as attachment_count,
+        dc.channel_name as discord_channel_name,
+        dc.guild_name as discord_guild_name,
+        CASE
+          WHEN dc.channel_name IS NOT NULL AND dc.guild_name IS NOT NULL
+            THEN '#' || dc.channel_name || ' (' || dc.guild_name || ')'
+          WHEN dc.channel_name IS NOT NULL
+            THEN '#' || dc.channel_name
+          ELSE m.recipient
+        END as display_name
       FROM messages m
       JOIN sources s ON s.id = m.source_id
       LEFT JOIN message_attachment_links mal ON mal.message_record_id = m.record_id
         AND mal.effective_to IS NULL AND mal.is_active = TRUE
+      LEFT JOIN discord_channels dc ON dc.channel_id = REPLACE(m.recipient, 'discord-channel:', '')
       WHERE ${where}
-      GROUP BY s.name, m.source_id, m.recipient
+      GROUP BY s.name, m.source_id, m.recipient, dc.channel_name, dc.guild_name
       ORDER BY count DESC
       LIMIT 200
     `, values);
