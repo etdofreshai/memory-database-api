@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Token Management</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:20px;max-width:1000px;margin:0 auto}
+h1{margin-bottom:20px;color:#fff;font-size:1.5rem}
+h2{margin:24px 0 12px;font-size:1.1rem;color:#ccc}
+.auth-bar{display:flex;gap:8px;margin-bottom:20px}
+.auth-bar input{flex:1;padding:8px 12px;background:#16213e;border:1px solid #333;color:#e0e0e0;border-radius:6px;font-size:14px}
+button{padding:8px 16px;background:#0f3460;color:#e0e0e0;border:none;border-radius:6px;cursor:pointer;font-size:13px}
+button:hover{background:#1a4a7a}
+button.danger{background:#8b0000}
+button.danger:hover{background:#a00}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #2a2a4a}
+th{background:#16213e;color:#aaa;font-weight:600;position:sticky;top:0}
+tr:hover{background:#16213e44}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.badge.active{background:#0a3d0a;color:#4caf50}
+.badge.inactive{background:#3d0a0a;color:#f44}
+.form-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.form-row input,.form-row select{padding:8px 12px;background:#16213e;border:1px solid #333;color:#e0e0e0;border-radius:6px;font-size:14px}
+.form-row input{flex:1;min-width:120px}
+.created-token{background:#0a3d0a;border:1px solid #4caf50;padding:12px;border-radius:8px;margin:12px 0;word-break:break-all}
+.created-token code{color:#4caf50;font-size:13px}
+.created-token button{margin-top:8px}
+#error{color:#f44;margin:8px 0}
+#status{color:#888;margin:8px 0;font-size:13px}
+@media(max-width:600px){table{font-size:11px}th,td{padding:4px 6px}.form-row{flex-direction:column}}
+</style>
+</head>
+<body>
+<h1>🔑 Token Management</h1>
+
+<div class="auth-bar">
+  <input type="password" id="adminToken" placeholder="Admin token">
+  <button onclick="saveAndLoad()">Connect</button>
+</div>
+
+<div id="error"></div>
+<div id="status"></div>
+
+<div id="newTokenResult"></div>
+
+<h2>Create Token</h2>
+<div class="form-row">
+  <input type="text" id="newLabel" placeholder="Label">
+  <select id="newPerms"><option value="read">read</option><option value="write">write</option><option value="admin">admin</option></select>
+  <input type="text" id="newSources" placeholder="write_sources (optional)">
+  <button onclick="createToken()">Create</button>
+</div>
+
+<h2>Tokens</h2>
+<table>
+  <thead><tr><th>Label</th><th>Permissions</th><th>Sources</th><th>Created</th><th>Last Used</th><th>Status</th><th></th></tr></thead>
+  <tbody id="tokenList"></tbody>
+</table>
+
+<script>
+const $ = id => document.getElementById(id);
+const tokenInput = $('adminToken');
+const saved = localStorage.getItem('admin_token');
+if (saved) { tokenInput.value = saved; load(); }
+
+function headers() {
+  return { 'Authorization': 'Bearer ' + tokenInput.value.trim(), 'Content-Type': 'application/json' };
+}
+
+function saveAndLoad() {
+  localStorage.setItem('admin_token', tokenInput.value.trim());
+  load();
+}
+
+async function load() {
+  $('error').textContent = '';
+  $('status').textContent = 'Loading...';
+  try {
+    const r = await fetch('/api/admin/tokens', { headers: headers() });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    const { tokens } = await r.json();
+    $('status').textContent = `${tokens.length} tokens`;
+    const tbody = $('tokenList');
+    tbody.innerHTML = tokens.map(t => `<tr>
+      <td>${esc(t.label)}</td>
+      <td>${esc(t.permissions)}</td>
+      <td>${esc(t.write_sources || '—')}</td>
+      <td>${fmtDate(t.created_at)}</td>
+      <td>${t.last_used_at ? fmtDate(t.last_used_at) : '—'}</td>
+      <td><span class="badge ${t.is_active ? 'active' : 'inactive'}">${t.is_active ? 'active' : 'inactive'}</span></td>
+      <td>${t.is_active ? `<button class="danger" onclick="deactivate(${t.id})">Deactivate</button>` : ''}</td>
+    </tr>`).join('');
+  } catch (e) {
+    $('error').textContent = e.message;
+    $('status').textContent = '';
+  }
+}
+
+async function createToken() {
+  const label = $('newLabel').value.trim();
+  const permissions = $('newPerms').value;
+  const write_sources = $('newSources').value.trim() || undefined;
+  if (!label) { $('error').textContent = 'Label required'; return; }
+  $('error').textContent = '';
+  try {
+    const r = await fetch('/api/admin/tokens', { method: 'POST', headers: headers(), body: JSON.stringify({ label, permissions, write_sources }) });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    const data = await r.json();
+    $('newTokenResult').innerHTML = `<div class="created-token"><strong>New token created!</strong> Copy it now — it won't be shown again.<br><code>${esc(data.token)}</code><br><button onclick="copyToken('${data.token}')">📋 Copy</button></div>`;
+    $('newLabel').value = '';
+    $('newSources').value = '';
+    load();
+  } catch (e) { $('error').textContent = e.message; }
+}
+
+async function deactivate(id) {
+  if (!confirm('Deactivate this token?')) return;
+  try {
+    const r = await fetch(`/api/admin/tokens/${id}`, { method: 'DELETE', headers: headers() });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    load();
+  } catch (e) { $('error').textContent = e.message; }
+}
+
+function copyToken(t) { navigator.clipboard.writeText(t); }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function fmtDate(s) { if (!s) return '—'; const d = new Date(s); return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
+</script>
+</body>
+</html>

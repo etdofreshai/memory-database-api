@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import healthRouter from './routes/health.js';
 import messagesRouter from './routes/messages.js';
 import sourcesRouter from './routes/sources.js';
@@ -17,6 +19,12 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// Serve tokens admin UI
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+app.get('/tokens', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'tokens.html'));
+});
 
 // API routes
 app.use('/api/health', healthRouter);
