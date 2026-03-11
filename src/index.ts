@@ -1,4 +1,3 @@
-import express from 'express';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -9,11 +8,7 @@ import { app } from './app.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000');
 
-// Serve admin frontend in production
-app.use('/admin', express.static(path.join(__dirname, '../admin/dist')));
-app.get('/admin/*', (_req, res) => {
-  res.sendFile(path.join(__dirname, '../admin/dist/index.html'));
-});
+// Admin UI has been moved to openclaw-memory-db-manager (standalone repo)
 
 async function bootstrap() {
   // Create api_tokens table

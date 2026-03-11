@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc && cd admin && npm run build",
+    "build": "tsc",
     "start": "node dist/index.js",
     "migrate": "tsx src/migrate.ts",
     "test": "vitest run"

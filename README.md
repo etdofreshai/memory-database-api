@@ -1,6 +1,8 @@
 # memory-database-api
 
-REST API for the OpenClaw memory database (messages, sources, people) with Bearer token auth, pgvector search, and a React admin dashboard.
+REST API for the OpenClaw memory database (messages, sources, people) with Bearer token auth and pgvector search.
+
+> **Note:** The admin UI has been moved to a standalone repo: [openclaw-memory-db-manager](https://github.com/etdofreshai/openclaw-memory-db-manager)
 
 ## Quick Start
 
