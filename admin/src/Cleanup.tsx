@@ -5,9 +5,9 @@ const BASE = import.meta.env.BASE_URL.replace(/\/admin\/?$/, '');
 interface Stats {
   total_messages: number;
   total_attachments: number;
-  sources: { source_id: number; source_name: string; count: number }[];
-  channels: { source_name: string; source_id: number; channel: string; count: number }[];
-  senders: { sender: string; count: number }[];
+  sources: { source_id: number; source_name: string; count: number; attachment_count: number }[];
+  channels: { source_name: string; source_id: number; channel: string; count: number; attachment_count: number }[];
+  senders: { sender: string; count: number; attachment_count: number }[];
   date_buckets: { month: string; count: number }[];
 }
 
@@ -224,6 +224,7 @@ export default function Cleanup() {
                     <th style={{ textAlign: 'left', padding: '8px 12px', color: '#aaa', borderBottom: '2px solid #333' }}>Source</th>
                     <th style={{ textAlign: 'left', padding: '8px 12px', color: '#aaa', borderBottom: '2px solid #333' }}>Channel</th>
                     <th style={{ textAlign: 'right', padding: '8px 12px', color: '#aaa', borderBottom: '2px solid #333' }}>Messages</th>
+                    <th style={{ textAlign: 'right', padding: '8px 12px', color: '#aaa', borderBottom: '2px solid #333' }}>Attachments</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -237,6 +238,7 @@ export default function Cleanup() {
                       <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e' }}>{ch.source_name}</td>
                       <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e' }}>{ch.channel || '—'}</td>
                       <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e', textAlign: 'right' }}>{ch.count.toLocaleString()}</td>
+                      <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e', textAlign: 'right', color: '#aaa' }}>{ch.attachment_count.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -255,6 +257,7 @@ export default function Cleanup() {
                       onClick={() => drillDown('sender', s.sender || '', s.sender || '(unknown)')}>
                       <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e' }}>{s.sender || '(unknown)'}</td>
                       <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e', textAlign: 'right' }}>{s.count.toLocaleString()}</td>
+                      <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e', textAlign: 'right', color: '#aaa' }}>{s.attachment_count.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -42,9 +42,13 @@ router.get('/stats', requireAuth('admin'), async (req, res) => {
 
     // Source breakdown
     const sourcesResult = await pool.query(`
-      SELECT s.id as source_id, s.name as source_name, COUNT(*)::int as count
+      SELECT s.id as source_id, s.name as source_name,
+        COUNT(DISTINCT m.id)::int as count,
+        COUNT(DISTINCT mal.attachment_record_id)::int as attachment_count
       FROM messages m
       JOIN sources s ON s.id = m.source_id
+      LEFT JOIN message_attachment_links mal ON mal.message_record_id = m.record_id
+        AND mal.effective_to IS NULL AND mal.is_active = TRUE
       WHERE ${where}
       GROUP BY s.id, s.name
       ORDER BY count DESC
@@ -52,9 +56,13 @@ router.get('/stats', requireAuth('admin'), async (req, res) => {
 
     // Channel breakdown (recipient field)
     const channelsResult = await pool.query(`
-      SELECT s.name as source_name, m.source_id, m.recipient as channel, COUNT(*)::int as count
+      SELECT s.name as source_name, m.source_id, m.recipient as channel,
+        COUNT(DISTINCT m.id)::int as count,
+        COUNT(DISTINCT mal.attachment_record_id)::int as attachment_count
       FROM messages m
       JOIN sources s ON s.id = m.source_id
+      LEFT JOIN message_attachment_links mal ON mal.message_record_id = m.record_id
+        AND mal.effective_to IS NULL AND mal.is_active = TRUE
       WHERE ${where}
       GROUP BY s.name, m.source_id, m.recipient
       ORDER BY count DESC
@@ -63,8 +71,12 @@ router.get('/stats', requireAuth('admin'), async (req, res) => {
 
     // Sender breakdown
     const sendersResult = await pool.query(`
-      SELECT m.sender, COUNT(*)::int as count
+      SELECT m.sender,
+        COUNT(DISTINCT m.id)::int as count,
+        COUNT(DISTINCT mal.attachment_record_id)::int as attachment_count
       FROM messages m
+      LEFT JOIN message_attachment_links mal ON mal.message_record_id = m.record_id
+        AND mal.effective_to IS NULL AND mal.is_active = TRUE
       WHERE ${where}
       GROUP BY m.sender
       ORDER BY count DESC
