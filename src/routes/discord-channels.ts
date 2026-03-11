@@ -14,7 +14,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 /**
  * GET /api/discord/channels — proxy to Discord ingestor's channel cache
  */
-router.get('/', requireAuth('read'), async (_req, res) => {
+router.get('/', requireAuth('read', 'admin'), async (_req, res) => {
   try {
     const now = Date.now();
     if (cachedChannels && now - cachedAt < CACHE_TTL_MS) {
