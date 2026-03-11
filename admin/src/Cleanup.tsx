@@ -37,6 +37,36 @@ export default function Cleanup() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
+  // Sorting
+  type SortKey = { key: string; direction: 'asc' | 'desc' };
+  const [channelSort, setChannelSort] = useState<SortKey[]>([]);
+  const [senderSort, setSenderSort] = useState<SortKey[]>([]);
+
+  const toggleSort = (sorts: SortKey[], setSorts: React.Dispatch<React.SetStateAction<SortKey[]>>, key: string) => {
+    const idx = sorts.findIndex(s => s.key === key);
+    if (idx === -1) {
+      setSorts([...sorts, { key, direction: 'asc' }]);
+    } else if (sorts[idx].direction === 'asc') {
+      setSorts(sorts.map((s, i) => i === idx ? { ...s, direction: 'desc' as const } : s));
+    } else {
+      setSorts(sorts.filter((_, i) => i !== idx));
+    }
+  };
+
+  const applySorts = <T extends Record<string, any>>(data: T[], sorts: SortKey[]): T[] => {
+    if (!sorts.length) return data;
+    return [...data].sort((a, b) => {
+      for (const { key, direction } of sorts) {
+        const av = a[key], bv = b[key];
+        let cmp = 0;
+        if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+        else cmp = String(av || '').localeCompare(String(bv || ''));
+        if (cmp !== 0) return direction === 'asc' ? cmp : -cmp;
+      }
+      return 0;
+    });
+  };
+
   // Breadcrumb
   const [breadcrumb, setBreadcrumb] = useState<{ label: string; sourceId?: string; channel?: string; sender?: string }[]>([]);
 
@@ -221,14 +251,14 @@ export default function Cleanup() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                 <thead>
                   <tr>
-                    <th style={{ textAlign: 'left', padding: '8px 12px', color: '#aaa', borderBottom: '2px solid #333' }}>Source</th>
-                    <th style={{ textAlign: 'left', padding: '8px 12px', color: '#aaa', borderBottom: '2px solid #333' }}>Channel</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: '#aaa', borderBottom: '2px solid #333' }}>Messages</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: '#aaa', borderBottom: '2px solid #333' }}>Attachments</th>
+                    <SortableHeader label="Source" sortKey="source_name" sorts={channelSort} onToggle={k => toggleSort(channelSort, setChannelSort, k)} />
+                    <SortableHeader label="Channel" sortKey="channel" sorts={channelSort} onToggle={k => toggleSort(channelSort, setChannelSort, k)} />
+                    <SortableHeader label="Messages" sortKey="count" sorts={channelSort} onToggle={k => toggleSort(channelSort, setChannelSort, k)} align="right" />
+                    <SortableHeader label="Attachments" sortKey="attachment_count" sorts={channelSort} onToggle={k => toggleSort(channelSort, setChannelSort, k)} align="right" />
                   </tr>
                 </thead>
                 <tbody>
-                  {stats.channels.slice(0, 50).map((ch, i) => (
+                  {applySorts(stats.channels, channelSort).slice(0, 50).map((ch, i) => (
                     <tr key={i} style={{ cursor: 'pointer' }}
                       onClick={() => {
                         if (!sourceId) drillDown('source', '', ch.source_name, String(ch.source_id));
@@ -251,8 +281,15 @@ export default function Cleanup() {
             <div style={{ marginTop: 16, background: '#16213e', borderRadius: 8, overflow: 'auto' }}>
               <h4 style={{ padding: '8px 12px', margin: 0, color: '#aaa' }}>Top Senders</h4>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                <thead>
+                  <tr>
+                    <SortableHeader label="Sender" sortKey="sender" sorts={senderSort} onToggle={k => toggleSort(senderSort, setSenderSort, k)} />
+                    <SortableHeader label="Messages" sortKey="count" sorts={senderSort} onToggle={k => toggleSort(senderSort, setSenderSort, k)} align="right" />
+                    <SortableHeader label="Attachments" sortKey="attachment_count" sorts={senderSort} onToggle={k => toggleSort(senderSort, setSenderSort, k)} align="right" />
+                  </tr>
+                </thead>
                 <tbody>
-                  {stats.senders.slice(0, 30).map((s, i) => (
+                  {applySorts(stats.senders, senderSort).slice(0, 30).map((s, i) => (
                     <tr key={i} style={{ cursor: 'pointer' }}
                       onClick={() => drillDown('sender', s.sender || '', s.sender || '(unknown)')}>
                       <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e' }}>{s.sender || '(unknown)'}</td>
@@ -327,6 +364,36 @@ export default function Cleanup() {
         </div>
       )}
     </div>
+  );
+}
+
+function SortableHeader({ label, sortKey, sorts, onToggle, align }: {
+  label: string; sortKey: string; sorts: { key: string; direction: 'asc' | 'desc' }[];
+  onToggle: (key: string) => void; align?: 'left' | 'right';
+}) {
+  const idx = sorts.findIndex(s => s.key === sortKey);
+  const active = idx !== -1;
+  const dir = active ? sorts[idx].direction : null;
+  return (
+    <th
+      onClick={() => onToggle(sortKey)}
+      style={{
+        textAlign: align || 'left', padding: '8px 12px', borderBottom: '2px solid #333',
+        cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
+        color: active ? '#64b5f6' : '#aaa',
+        background: active ? 'rgba(100,181,246,0.07)' : 'transparent',
+      }}
+    >
+      {label}{' '}
+      {active ? (
+        <span style={{ fontSize: 11 }}>
+          <span style={{ background: '#2a3f5f', borderRadius: 4, padding: '1px 4px', marginRight: 2, fontSize: 10 }}>{idx + 1}</span>
+          {dir === 'asc' ? '↑' : '↓'}
+        </span>
+      ) : (
+        <span style={{ fontSize: 11, opacity: 0.4 }}>↕</span>
+      )}
+    </th>
   );
 }
 
