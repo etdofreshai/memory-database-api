@@ -9,6 +9,7 @@ COPY src/ src/
 
 RUN npx tsc
 
+COPY src/public/ src/public/
 COPY migrations/ migrations/
 
 FROM node:22-alpine
@@ -18,6 +19,7 @@ WORKDIR /app
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules/ node_modules/
 COPY --from=builder /app/dist/ dist/
+COPY --from=builder /app/src/public/ dist/public/
 COPY --from=builder /app/migrations/ migrations/
 
 ENV PORT=3000
