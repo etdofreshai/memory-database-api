@@ -170,11 +170,60 @@ router.get('/preview', requireAuth('admin'), async (req, res) => {
       ) AND mal.effective_to IS NULL AND mal.is_active = TRUE
     `, values);
 
+    // Breakdown by source
+    const sourcesBreakdown = await pool.query(`
+      SELECT s.name, COUNT(*)::int as count
+      FROM messages m JOIN sources s ON s.id = m.source_id
+      WHERE ${where}
+      GROUP BY s.name ORDER BY count DESC
+    `, values);
+
+    // Breakdown by channel (top 20)
+    const channelsBreakdown = await pool.query(`
+      SELECT m.recipient as channel, COUNT(*)::int as count
+      FROM messages m
+      WHERE ${where}
+      GROUP BY m.recipient ORDER BY count DESC LIMIT 20
+    `, values);
+
+    // Breakdown by sender (top 10)
+    const sendersBreakdown = await pool.query(`
+      SELECT m.sender, COUNT(*)::int as count
+      FROM messages m
+      WHERE ${where}
+      GROUP BY m.sender ORDER BY count DESC LIMIT 10
+    `, values);
+
+    // Date range
+    const dateRange = await pool.query(`
+      SELECT MIN(m.timestamp) as earliest, MAX(m.timestamp) as latest
+      FROM messages m
+      WHERE ${where}
+    `, values);
+
+    // Sample messages (first 5)
+    const sampleMessages = await pool.query(`
+      SELECT m.id, m.sender, LEFT(m.content, 200) as content, m.timestamp, s.name as source
+      FROM messages m JOIN sources s ON s.id = m.source_id
+      WHERE ${where}
+      ORDER BY m.timestamp ASC LIMIT 5
+    `, values);
+
     res.json({
       messages: msgResult.rows[0]?.message_count || 0,
       links: linkResult.rows[0]?.link_count || 0,
       orphaned_attachments: orphanResult.rows[0]?.orphaned_attachments || 0,
       total_linked_attachments: orphanResult.rows[0]?.total_linked || 0,
+      breakdown: {
+        sources: sourcesBreakdown.rows,
+        channels: channelsBreakdown.rows,
+        senders: sendersBreakdown.rows,
+        dateRange: {
+          earliest: dateRange.rows[0]?.earliest || null,
+          latest: dateRange.rows[0]?.latest || null,
+        },
+      },
+      sampleMessages: sampleMessages.rows,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
