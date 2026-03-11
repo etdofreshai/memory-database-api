@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Viewer from './Viewer.js';
 import Embeddings from './Embeddings.js';
 import Enrichments from './Enrichments.js';
+import Cleanup from './Cleanup.js';
 
 interface Token {
   id: number; label: string; permissions: string; write_sources: string[] | null;
@@ -102,6 +103,7 @@ function AdminPanel() {
         <a href={`${BASE}/admin/viewer`}>Open Viewer →</a>
         <a href={`${BASE}/admin/embeddings`}>Open Embeddings →</a>
         <a href={`${BASE}/admin/enrichments`}>Open Enrichments →</a>
+        <a href={`${BASE}/admin/cleanup`}>Open Cleanup →</a>
       </div>
       <div style={{ marginBottom: '1rem' }}>
         <input placeholder="Admin token" type="password" value={adminToken} onChange={e => setAdminToken(e.target.value)} style={{ width: 400, marginRight: 8 }} />
@@ -171,6 +173,9 @@ export default function App() {
   }
   if (path.startsWith('/admin/enrichments')) {
     return <Enrichments />;
+  }
+  if (path.startsWith('/admin/cleanup')) {
+    return <Cleanup />;
   }
   return <AdminPanel />;
 }

@@ -10,6 +10,7 @@ import ingestRouter from './routes/ingest.js';
 import attachmentsRouter from './routes/attachments.js';
 import linksRouter from './routes/links.js';
 import enrichmentsRouter from './routes/enrichments.js';
+import cleanupRouter from './routes/cleanup.js';
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use('/api/admin', adminRouter);
 app.use('/api/attachments', attachmentsRouter);
 app.use('/api/enrichments', enrichmentsRouter);
 app.use('/api/links', linksRouter);
+app.use('/api/cleanup', cleanupRouter);
 
 export { app };
 export default app;
