@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth.js';
 const router = Router();
 
 const DISCORD_INGESTOR_URL = (process.env.DISCORD_INGESTOR_URL ?? 'http://localhost:3456').replace(/\/+$/, '');
+const DISCORD_INGESTOR_TOKEN = process.env.DISCORD_INGESTOR_TOKEN ?? '';
 
 // In-memory cache with 5-minute TTL
 let cachedChannels: any = null;
@@ -21,7 +22,11 @@ router.get('/', requireAuth('read'), async (_req, res) => {
       return;
     }
 
-    const response = await fetch(`${DISCORD_INGESTOR_URL}/api/channels`);
+    const headers: Record<string, string> = {};
+    if (DISCORD_INGESTOR_TOKEN) {
+      headers['Authorization'] = `Bearer ${DISCORD_INGESTOR_TOKEN}`;
+    }
+    const response = await fetch(`${DISCORD_INGESTOR_URL}/api/channels`, { headers });
     if (!response.ok) {
       throw new Error(`Ingestor returned ${response.status}`);
     }
