@@ -44,4 +44,33 @@ router.get('/', requireAuth('read', 'admin'), async (_req, res) => {
   }
 });
 
+/**
+ * GET /api/discord/channels/stats — latest message timestamp per discord channel
+ */
+router.get('/stats', requireAuth('read', 'admin'), async (_req, res) => {
+  try {
+    const pool = (await import('../db.js')).default;
+    const result = await pool.query(`
+      SELECT 
+        substring(recipient from 'discord-channel:(.+)') as channel_id,
+        MAX(timestamp) as last_message_at,
+        COUNT(*)::int as message_count
+      FROM messages
+      WHERE recipient LIKE 'discord-channel:%'
+        AND effective_to IS NULL AND is_active = TRUE
+      GROUP BY recipient
+    `);
+    const channels: Record<string, { lastMessageAt: string; messageCount: number }> = {};
+    for (const row of result.rows) {
+      channels[row.channel_id] = {
+        lastMessageAt: row.last_message_at?.toISOString?.() ?? row.last_message_at,
+        messageCount: row.message_count,
+      };
+    }
+    res.json({ channels });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
