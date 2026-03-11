@@ -2,11 +2,17 @@ import React, { useState, useEffect, useCallback } from 'react';
 
 const BASE = import.meta.env.BASE_URL.replace(/\/admin\/?$/, '');
 
+interface ChannelInfo {
+  channelName: string;
+  guildId: string | null;
+  guildName: string | null;
+}
+
 interface Stats {
   total_messages: number;
   total_attachments: number;
   sources: { source_id: number; source_name: string; count: number; attachment_count: number }[];
-  channels: { source_name: string; source_id: number; channel: string; count: number; attachment_count: number; display_name?: string; discord_channel_name?: string; discord_guild_name?: string }[];
+  channels: { source_name: string; source_id: number; channel: string; count: number; attachment_count: number; display_name?: string }[];
   senders: { sender: string; count: number; attachment_count: number }[];
   date_buckets: { month: string; count: number }[];
 }
@@ -29,6 +35,9 @@ export default function Cleanup() {
   const [toast, setToast] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmText, setConfirmText] = useState('');
+
+  // Discord channel name map
+  const [channelMap, setChannelMap] = useState<Record<string, ChannelInfo>>({});
 
   // Filters
   const [sourceId, setSourceId] = useState('');
@@ -100,6 +109,30 @@ export default function Cleanup() {
       setLoading(false);
     }
   }, [token, buildParams, headers]);
+
+  // Fetch discord channel names on load
+  useEffect(() => {
+    fetch(`${BASE}/api/discord/channels`, { headers: headers() })
+      .then(r => r.ok ? r.json() : {})
+      .then(data => setChannelMap(data || {}))
+      .catch(() => {});
+  }, [token]);
+
+  // Resolve display names from channel map
+  const resolveDisplayName = (ch: string): string => {
+    const id = ch.replace('discord-channel:', '');
+    const info = channelMap[id];
+    if (info) {
+      return info.guildName ? `#${info.channelName} (${info.guildName})` : `#${info.channelName}`;
+    }
+    return ch;
+  };
+
+  // Enrich stats channels with display names
+  const enrichedChannels = stats?.channels.map(ch => ({
+    ...ch,
+    display_name: ch.channel?.startsWith('discord-channel:') ? resolveDisplayName(ch.channel) : (ch.channel || '—'),
+  }));
 
   useEffect(() => { loadStats(); }, []);
 
@@ -258,7 +291,7 @@ export default function Cleanup() {
                   </tr>
                 </thead>
                 <tbody>
-                  {applySorts(stats.channels, channelSort).slice(0, 50).map((ch, i) => (
+                  {applySorts(enrichedChannels || [], channelSort).slice(0, 50).map((ch, i) => (
                     <tr key={i} style={{ cursor: 'pointer' }}
                       onClick={() => {
                         if (!sourceId) drillDown('source', '', ch.source_name, String(ch.source_id));
@@ -268,9 +301,6 @@ export default function Cleanup() {
                       <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e' }}>{ch.source_name}</td>
                       <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e' }} title={ch.channel}>
                         {ch.display_name || ch.channel || '—'}
-                        {ch.discord_guild_name && !ch.display_name && (
-                          <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>{ch.discord_guild_name}</span>
-                        )}
                       </td>
                       <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e', textAlign: 'right' }}>{ch.count.toLocaleString()}</td>
                       <td style={{ padding: '6px 12px', borderBottom: '1px solid #2a2a3e', textAlign: 'right', color: '#aaa' }}>{ch.attachment_count.toLocaleString()}</td>

@@ -1,53 +1,41 @@
 import { Router } from 'express';
-import pool from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
+const DISCORD_INGESTOR_URL = (process.env.DISCORD_INGESTOR_URL ?? 'http://localhost:3456').replace(/\/+$/, '');
+
+// In-memory cache with 5-minute TTL
+let cachedChannels: any = null;
+let cachedAt = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
 /**
- * GET /api/discord/channels — return all stored channel mappings
+ * GET /api/discord/channels — proxy to Discord ingestor's channel cache
  */
 router.get('/', requireAuth('read'), async (_req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT channel_id, channel_name, guild_id, guild_name, updated_at FROM discord_channels ORDER BY guild_name, channel_name'
-    );
-    res.json(result.rows);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * POST /api/discord/channels — upsert channel metadata (single or batch)
- * Accepts: { channelId, channelName, guildId, guildName }
- * Or an array of the same.
- */
-router.post('/', requireAuth('write'), async (req, res) => {
-  try {
-    const items = Array.isArray(req.body) ? req.body : [req.body];
-    let upserted = 0;
-
-    for (const item of items) {
-      const { channelId, channelName, guildId, guildName } = item;
-      if (!channelId) continue;
-
-      await pool.query(
-        `INSERT INTO discord_channels (channel_id, channel_name, guild_id, guild_name, updated_at)
-         VALUES ($1, $2, $3, $4, NOW())
-         ON CONFLICT (channel_id) DO UPDATE SET
-           channel_name = COALESCE(EXCLUDED.channel_name, discord_channels.channel_name),
-           guild_id = COALESCE(EXCLUDED.guild_id, discord_channels.guild_id),
-           guild_name = COALESCE(EXCLUDED.guild_name, discord_channels.guild_name),
-           updated_at = NOW()`,
-        [channelId, channelName || null, guildId || null, guildName || null]
-      );
-      upserted++;
+    const now = Date.now();
+    if (cachedChannels && now - cachedAt < CACHE_TTL_MS) {
+      res.json(cachedChannels);
+      return;
     }
 
-    res.json({ upserted });
+    const response = await fetch(`${DISCORD_INGESTOR_URL}/api/channels`);
+    if (!response.ok) {
+      throw new Error(`Ingestor returned ${response.status}`);
+    }
+
+    cachedChannels = await response.json();
+    cachedAt = now;
+    res.json(cachedChannels);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    // Return stale cache if available
+    if (cachedChannels) {
+      res.json(cachedChannels);
+      return;
+    }
+    res.status(502).json({ error: `Failed to fetch channels from ingestor: ${err.message}` });
   }
 });
 
