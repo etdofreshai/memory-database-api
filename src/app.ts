@@ -14,6 +14,7 @@ import linksRouter from './routes/links.js';
 import enrichmentsRouter from './routes/enrichments.js';
 import cleanupRouter from './routes/cleanup.js';
 import discordChannelsRouter from './routes/discord-channels.js';
+import chatgptRouter from './routes/chatgpt.js';
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.use('/api/enrichments', enrichmentsRouter);
 app.use('/api/links', linksRouter);
 app.use('/api/cleanup', cleanupRouter);
 app.use('/api/discord/channels', discordChannelsRouter);
+app.use('/api/chatgpt', chatgptRouter);
 
 export { app };
 export default app;
