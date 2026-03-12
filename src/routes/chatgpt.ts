@@ -11,6 +11,7 @@ router.get('/conversations/stats', requireAuth('read', 'write', 'admin'), async 
     const result = await pool.query(`
       SELECT
         metadata->>'conversationId' AS conversation_id,
+        MAX(metadata->>'conversationTitle') AS title,
         COUNT(*) AS message_count,
         MAX(timestamp) AS last_message_at
       FROM messages
@@ -18,13 +19,15 @@ router.get('/conversations/stats', requireAuth('read', 'write', 'admin'), async 
         AND metadata->>'conversationId' IS NOT NULL
         AND (effective_to IS NULL OR is_active = TRUE)
       GROUP BY metadata->>'conversationId'
+      ORDER BY MAX(timestamp) DESC
     `);
 
-    const stats: Record<string, { messageCount: number; lastMessageAt: string | null }> = {};
+    const stats: Record<string, { messageCount: number; lastMessageAt: string | null; title: string | null }> = {};
     for (const row of result.rows) {
       stats[row.conversation_id] = {
         messageCount: parseInt(row.message_count, 10),
         lastMessageAt: row.last_message_at ? row.last_message_at.toISOString() : null,
+        title: row.title || null,
       };
     }
 
