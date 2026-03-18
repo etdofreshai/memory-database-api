@@ -33,10 +33,7 @@ async function bootstrap() {
     console.log('✅ Base schema migration applied');
   }
 
-  // Run embedding migration
-  const embeddingMigrationPath = path.join(__dirname, '../migrations/002-add-embedding.sql');
-  const embeddingMigrationSql = fs.readFileSync(embeddingMigrationPath, 'utf8');
-  await pool.query(embeddingMigrationSql);
+  // Embedding migration skipped — pgvector not available on this deployment
 
   // Run SCD Type 2 migration
   const scdMigrationPath = path.join(__dirname, '../migrations/003-scd-type2.sql');

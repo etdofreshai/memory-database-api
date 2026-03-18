@@ -1,6 +1,6 @@
 -- Attachments V1 migration
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE EXTENSION IF NOT EXISTS vector;
+-- vector extension removed (not available on this deployment)
 
 -- attachments table
 CREATE TABLE IF NOT EXISTS attachments (
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS attachments (
   user_notes TEXT,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   embedding_input TEXT,
-  embedding VECTOR(1536),
+  -- embedding VECTOR(1536),  -- removed: pgvector not available
   embedding_model TEXT,
   embedding_updated_at TIMESTAMPTZ,
   effective_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),

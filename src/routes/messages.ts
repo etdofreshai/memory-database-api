@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import pool from '../db.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
-import { generateEmbedding } from '../embeddings.js';
 
 const router = Router();
 
@@ -30,38 +29,6 @@ router.get('/search', requireAuth('read', 'write', 'admin'), async (req, res) =>
 });
 
 // Vector search
-router.get('/vector-search', requireAuth('read', 'write', 'admin'), async (req, res) => {
-  const q = (req.body?.q ?? req.query?.q ?? '').toString().trim();
-  const limit = Number(req.body?.limit ?? req.query?.limit ?? 10);
-  const includeHistory = (req.body?.include_history ?? req.query?.include_history) === 'true';
-
-  if (!q) {
-    res.status(400).json({ error: 'q is required' }); return;
-  }
-
-  try {
-    const embedding = await generateEmbedding(q);
-    const vecStr = `[${embedding.join(',')}]`;
-
-    const table = baseTable(includeHistory);
-    const result = await pool.query(
-      `SELECT m.*, s.name as source_name,
-       m.embedding <=> $1::vector as distance
-       FROM ${table} m
-       LEFT JOIN sources s ON m.source_id = s.id
-       WHERE m.embedding IS NOT NULL
-       ORDER BY m.embedding <=> $1::vector
-       LIMIT $2`,
-      [vecStr, Math.max(1, Math.min(limit || 10, 200))]
-    );
-
-    res.json({ messages: result.rows });
-  } catch (err: any) {
-    const msg = err?.message || 'Embedding generation failed';
-    const status = msg.includes('Ollama') ? 503 : 500;
-    res.status(status).json({ error: msg });
-  }
-});
 
 // Get linked attachments for a message by record_id
 router.get('/:record_id/attachments', requireAuth('read', 'write', 'admin'), async (req, res) => {
@@ -171,7 +138,6 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
       `SELECT m.id, m.source_id, m.sender, m.recipient, m.content, m.timestamp, m.metadata,
               m.external_id, m.created_at, m.record_id, m.effective_from, m.effective_to, m.is_active,
               s.name as source_name,
-              CASE WHEN m.embedding IS NOT NULL THEN LEFT(m.embedding::text, 60) ELSE NULL END as embedding_preview,
               CASE
                 WHEN m.record_id IS NULL THEN 0
                 ELSE (SELECT COUNT(*)::int FROM messages mv WHERE mv.record_id = m.record_id)
@@ -277,13 +243,6 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
         const newRow = result.rows[0];
         res.status(201).json(newRow);
 
-        // Generate embedding in background
-        generateEmbedding(content).then(embedding => {
-          if (embedding) {
-            pool.query('UPDATE messages SET embedding = $1 WHERE id = $2', [`[${embedding.join(',')}]`, newRow.id])
-              .catch(err => console.warn('Failed to save embedding:', err.message));
-          }
-        }).catch(err => console.warn('Failed to generate embedding:', err.message));
 
         return;
       }
@@ -301,13 +260,6 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
 
     res.status(201).json(result.rows[0]);
 
-    // Generate embedding in background
-    generateEmbedding(content).then(embedding => {
-      if (embedding) {
-        pool.query('UPDATE messages SET embedding = $1 WHERE id = $2', [`[${embedding.join(',')}]`, result.rows[0].id])
-          .catch(err => console.warn('Failed to save embedding:', err.message));
-      }
-    }).catch(err => console.warn('Failed to generate embedding:', err.message));
   } catch (err: any) {
     await client.query('ROLLBACK').catch(() => {});
     client.release();

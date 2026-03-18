@@ -5,7 +5,6 @@ import fs from 'fs';
 import path from 'path';
 import pool from '../db.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
-import { generateEmbedding } from '../embeddings.js';
 import { queueEnrichment } from '../enrichments.js';
 
 const router = Router();
@@ -240,15 +239,6 @@ router.post('/', requireAuth('write', 'admin'), upload.array('files', MAX_FILES)
       attachments: attachmentResults,
     });
 
-    // Background embedding for message
-    if (content) {
-      generateEmbedding(content).then(embedding => {
-        if (embedding) {
-          pool.query('UPDATE messages SET embedding = $1 WHERE id = $2', [`[${embedding.join(',')}]`, messageRow.id])
-            .catch(() => {});
-        }
-      }).catch(() => {});
-    }
 
     // Queue enrichment for each attachment (background)
     for (let i = 0; i < files.length; i++) {

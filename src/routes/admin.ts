@@ -4,14 +4,12 @@ import { promisify } from 'util';
 import { execFile } from 'child_process';
 import pool from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
-import { generateEmbedding } from '../embeddings.js';
 
 const router = Router();
 
 type EmbeddingSample = {
   id: number;
   content_preview: string;
-  embedding_preview: number[];
 };
 
 type BackfillState = {
@@ -111,44 +109,6 @@ router.delete('/tokens/:id', requireAuth('admin'), async (req, res) => {
     );
     if (result.rows.length === 0) { res.status(404).json({ error: 'Token not found' }); return; }
     res.json({ message: 'Token deactivated' });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/embeddings/status', requireAuth('admin'), async (_req, res) => {
-  try {
-    // Count only current (non-superseded, active) messages for embedding stats
-    const result = await pool.query(`
-      SELECT
-        COUNT(*)::int AS total,
-        COUNT(embedding)::int AS embedded,
-        (COUNT(*) - COUNT(embedding))::int AS remaining
-      FROM messages
-      WHERE effective_to IS NULL AND is_active = TRUE
-    `);
-
-    const total = result.rows[0]?.total || 0;
-    const embedded = result.rows[0]?.embedded || 0;
-    const remaining = result.rows[0]?.remaining || 0;
-    const percentage = total > 0 ? Number(((embedded / total) * 100).toFixed(2)) : 0;
-
-    res.json({
-      total,
-      embedded,
-      remaining,
-      percentage,
-      isRunning: backfillState.isRunning,
-      currentBatch: backfillState.currentBatch,
-      totalBatches: backfillState.totalBatches,
-      processed: backfillState.processed,
-      errorsCount: backfillState.errorsCount,
-      errors: backfillState.errors,
-      logs: backfillState.logs,
-      recentSamples: backfillState.recentSamples,
-      lastRunStartedAt: backfillState.lastRunStartedAt,
-      lastRunFinishedAt: backfillState.lastRunFinishedAt
-    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -293,7 +253,7 @@ async function runBackfill(batchSize: number, limit: number) {
     const toProcess = await pool.query(
       `SELECT id, content
        FROM messages
-       WHERE embedding IS NULL AND effective_to IS NULL AND is_active = TRUE
+       WHERE effective_to IS NULL AND is_active = TRUE
        ORDER BY id ASC
        LIMIT $1`,
       [limit]
@@ -313,16 +273,12 @@ async function runBackfill(batchSize: number, limit: number) {
         if (!content) continue;
 
         try {
-          const embedding = await generateEmbedding(content);
-          const vecStr = `[${embedding.join(',')}]`;
-          await pool.query('UPDATE messages SET embedding = $1::vector WHERE id = $2', [vecStr, row.id]);
           backfillState.processed++;
           batchEmbedded++;
 
           backfillState.recentSamples.push({
             id: row.id,
             content_preview: content.slice(0, 120),
-            embedding_preview: embedding.slice(0, 5)
           });
           backfillState.recentSamples = backfillState.recentSamples.slice(-5);
         } catch (err: any) {
@@ -349,23 +305,5 @@ async function runBackfill(batchSize: number, limit: number) {
   }
 }
 
-router.post('/embeddings/backfill', requireAuth('admin'), async (req, res) => {
-  if (backfillState.isRunning) {
-    res.status(409).json({ error: 'Backfill already running' });
-    return;
-  }
-
-  const batchSize = Math.max(1, Math.min(Number(req.body?.batchSize) || 50, 500));
-  const limit = Math.max(1, Math.min(Number(req.body?.limit) || 1000000, 1000000));
-
-  void runBackfill(batchSize, limit);
-
-  res.json({
-    started: true,
-    batchSize,
-    limit,
-    isRunning: true
-  });
-});
 
 export default router;
