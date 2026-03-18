@@ -5,7 +5,6 @@ import fs from 'fs';
 import path from 'path';
 import pool from '../db.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
-import { queueEnrichment } from '../enrichments.js';
 
 const router = Router();
 
@@ -240,22 +239,6 @@ router.post('/', requireAuth('write', 'admin'), upload.array('files', MAX_FILES)
     });
 
 
-    // Queue enrichment for each attachment (background)
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const attachment = attachmentResults[i];
-      if (attachment?.storage_path) {
-        queueEnrichment(
-          attachment.record_id,
-          attachment.storage_path,
-          file.mimetype || 'application/octet-stream',
-          mimeToFileType(file.mimetype),
-          file.originalname
-        ).catch(err => {
-          console.error(`Failed to queue enrichment for ${attachment.record_id}:`, err.message);
-        });
-      }
-    }
   } catch (err: any) {
     await client.query('ROLLBACK').catch(() => {});
     client.release();
