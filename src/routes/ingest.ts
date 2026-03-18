@@ -47,8 +47,73 @@ function computeSha256(buffer: Buffer): string {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
+type ConflictMode = 'skip_or_append' | 'skip_or_overwrite';
+
+const VALID_CONFLICT_MODES = new Set<ConflictMode>(['skip_or_append', 'skip_or_overwrite']);
+
+/**
+ * Find an existing message by identity key.
+ * Uses two strategies:
+ *   1. source_id + metadata->>'provider_message_id' (if set)
+ *   2. source_id + sender + recipient + timestamp (to the second)
+ * Falls back to source_id + external_id (legacy path)
+ */
+async function findExistingMessage(
+  client: any,
+  source_id: number,
+  sender: string | undefined,
+  recipient: string | undefined,
+  timestamp: string,
+  metadata: any,
+  external_id: string | undefined
+): Promise<{ id: number; record_id: string; content: string | null; metadata: any } | null> {
+  // Strategy 1: provider_message_id
+  const providerMsgId = metadata?.provider_message_id;
+  if (providerMsgId) {
+    const r = await client.query(
+      `SELECT id, record_id, content, metadata FROM messages
+       WHERE source_id = $1 AND metadata->>'provider_message_id' = $2 AND effective_to IS NULL
+       LIMIT 1`,
+      [source_id, String(providerMsgId)]
+    );
+    if (r.rows.length > 0) return r.rows[0];
+  }
+
+  // Strategy 2: external_id (legacy, most ingestors use this)
+  if (external_id) {
+    const r = await client.query(
+      `SELECT id, record_id, content, metadata FROM messages
+       WHERE source_id = $1 AND external_id = $2 AND effective_to IS NULL
+       LIMIT 1`,
+      [source_id, external_id]
+    );
+    if (r.rows.length > 0) return r.rows[0];
+  }
+
+  // Strategy 3: natural key (source_id + sender + recipient + timestamp)
+  if (sender && timestamp) {
+    const r = await client.query(
+      `SELECT id, record_id, content, metadata FROM messages
+       WHERE source_id = $1 AND sender = $2 AND recipient = $3
+         AND date_trunc('second', "timestamp") = date_trunc('second', $4::timestamptz)
+         AND effective_to IS NULL
+       LIMIT 1`,
+      [source_id, sender, recipient || '', timestamp]
+    );
+    if (r.rows.length > 0) return r.rows[0];
+  }
+
+  return null;
+}
+
 // POST /api/messages/ingest
 router.post('/', requireAuth('write', 'admin'), upload.array('files', MAX_FILES), async (req: AuthRequest, res) => {
+  // Parse conflict_mode from query param or body field
+  const rawMode = (req.query.conflict_mode as string) || req.body.conflict_mode || 'skip_or_append';
+  const conflictMode: ConflictMode = VALID_CONFLICT_MODES.has(rawMode as ConflictMode)
+    ? (rawMode as ConflictMode)
+    : 'skip_or_append';
+
   // Parse message field
   let messageData: any;
   try {
@@ -105,40 +170,55 @@ router.post('/', requireAuth('write', 'admin'), upload.array('files', MAX_FILES)
     const source_id = sourceResult.rows[0].id;
 
     const ts = timestamp || new Date().toISOString();
-    const meta = metadata ? JSON.stringify(metadata) : null;
+    const meta = metadata ? (typeof metadata === 'string' ? metadata : JSON.stringify(metadata)) : null;
+    const metaObj = metadata || null;
 
-    // 2. Upsert message (SCD2 logic from messages route)
+    // 2. Handle message with conflict_mode
     let messageRow: any;
-    if (external_id) {
-      const existing = await client.query(
-        `SELECT id, record_id, content FROM messages WHERE source_id = $1 AND external_id = $2 AND effective_to IS NULL LIMIT 1`,
-        [source_id, external_id]
-      );
-      if (existing.rows.length > 0) {
-        const old = existing.rows[0];
-        if (old.content === content) {
-          // Unchanged — reuse
-          messageRow = old;
-        } else {
-          const now = new Date().toISOString();
-          await client.query('UPDATE messages SET effective_to = $1 WHERE id = $2', [now, old.id]);
-          const ins = await client.query(
-            `INSERT INTO messages (source_id, sender, recipient, content, timestamp, external_id, metadata, record_id, effective_from)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-            [source_id, sender, recipient, content, ts, external_id, meta, old.record_id, now]
-          );
-          messageRow = ins.rows[0];
-        }
+    let messageAction: 'inserted' | 'skipped' | 'appended' | 'overwritten' = 'inserted';
+
+    // Try to find existing message
+    const existing = await findExistingMessage(client, source_id, sender, recipient, ts, metaObj, external_id);
+
+    if (existing) {
+      const contentIdentical = (existing.content ?? null) === (content ?? null);
+
+      if (contentIdentical) {
+        // Content identical → always skip
+        messageRow = existing;
+        messageAction = 'skipped';
+      } else if (conflictMode === 'skip_or_overwrite') {
+        // Content different + overwrite mode → UPDATE in place
+        await client.query(
+          `UPDATE messages SET content = $1, metadata = $2, updated_at = NOW()
+           WHERE id = $3 AND effective_to IS NULL`,
+          [content, meta, existing.id]
+        );
+        messageRow = { ...existing, content };
+        messageAction = 'overwritten';
+      } else {
+        // Content different + append mode → SCD Type 2
+        const now = new Date().toISOString();
+        await client.query('UPDATE messages SET effective_to = $1 WHERE id = $2', [now, existing.id]);
+        const ins = await client.query(
+          `INSERT INTO messages (source_id, sender, recipient, content, timestamp, external_id, metadata, record_id, effective_from)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+          [source_id, sender, recipient, content, ts, external_id, meta, existing.record_id, now]
+        );
+        messageRow = ins.rows[0];
+        messageAction = 'appended';
       }
     }
 
     if (!messageRow) {
+      // No existing found — insert new
       const ins = await client.query(
         `INSERT INTO messages (source_id, sender, recipient, content, timestamp, external_id, metadata)
          VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
         [source_id, sender, recipient, content, ts, external_id, meta]
       );
       messageRow = ins.rows[0];
+      messageAction = 'inserted';
     }
 
     const messageRecordId = messageRow.record_id;
@@ -151,7 +231,7 @@ router.post('/', requireAuth('write', 'admin'), upload.array('files', MAX_FILES)
       const fileMeta = attachmentsMeta[i] || {};
       const sha256 = computeSha256(file.buffer);
 
-      // Check dedupe
+      // Check dedupe by sha256
       const dupeCheck = await client.query(
         'SELECT record_id, storage_path FROM current_attachments WHERE sha256 = $1 LIMIT 1',
         [sha256]
@@ -160,12 +240,31 @@ router.post('/', requireAuth('write', 'admin'), upload.array('files', MAX_FILES)
       let attachmentRecordId: string;
       let storagePath: string;
       let deduplicated = false;
+      let attachmentAction: 'inserted' | 'skipped' | 'overwritten' = 'inserted';
 
       if (dupeCheck.rows.length > 0) {
-        // Reuse existing
-        attachmentRecordId = dupeCheck.rows[0].record_id;
-        storagePath = dupeCheck.rows[0].storage_path;
-        deduplicated = true;
+        if (conflictMode === 'skip_or_overwrite') {
+          // Overwrite existing attachment metadata (but file content is same sha256)
+          attachmentRecordId = dupeCheck.rows[0].record_id;
+          storagePath = dupeCheck.rows[0].storage_path;
+
+          // Update metadata fields if provided
+          if (fileMeta.original_file_name || file.originalname) {
+            await client.query(
+              `UPDATE attachments SET original_file_name = COALESCE($1, original_file_name), updated_at = NOW()
+               WHERE record_id = $2 AND effective_to IS NULL`,
+              [fileMeta.original_file_name || file.originalname, attachmentRecordId]
+            );
+          }
+          deduplicated = true;
+          attachmentAction = 'overwritten';
+        } else {
+          // Skip — reuse existing
+          attachmentRecordId = dupeCheck.rows[0].record_id;
+          storagePath = dupeCheck.rows[0].storage_path;
+          deduplicated = true;
+          attachmentAction = 'skipped';
+        }
       } else {
         // Create new attachment
         const ext = getExtension(fileMeta.original_file_name || file.originalname, file.mimetype);
@@ -195,6 +294,7 @@ router.post('/', requireAuth('write', 'admin'), upload.array('files', MAX_FILES)
         // Write file to disk
         fs.writeFileSync(storagePath, file.buffer);
         writtenFiles.push(storagePath);
+        attachmentAction = 'inserted';
       }
 
       // Create link (idempotent — skip if already exists for this msg+attachment pair)
@@ -220,6 +320,7 @@ router.post('/', requireAuth('write', 'admin'), upload.array('files', MAX_FILES)
         record_id: attachmentRecordId,
         sha256,
         deduplicated,
+        action: attachmentAction,
         storage_path: storagePath,
         link_id: linkResult.rows[0].id,
       });
@@ -228,14 +329,16 @@ router.post('/', requireAuth('write', 'admin'), upload.array('files', MAX_FILES)
     await client.query('COMMIT');
     client.release();
 
-    res.status(201).json({
+    res.status(messageAction === 'inserted' ? 201 : 200).json({
       message: {
         id: messageRow.id,
         record_id: messageRecordId,
         source,
         content,
+        action: messageAction,
       },
       attachments: attachmentResults,
+      conflict_mode: conflictMode,
     });
 
 

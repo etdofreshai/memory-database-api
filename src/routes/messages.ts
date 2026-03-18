@@ -164,12 +164,17 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
   }
 });
 
-// Create message (with SCD Type 2 upsert)
+// Create message (with SCD Type 2 upsert + conflict_mode support)
 router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) => {
-  const { source, sender, recipient, content, timestamp, external_id, metadata } = req.body;
+  const { source, sender, recipient, content, timestamp, external_id, metadata, conflict_mode: bodyMode } = req.body;
   if (!source || !content) {
     res.status(400).json({ error: 'source and content required' }); return;
   }
+
+  // Parse conflict_mode from query param or body field
+  const rawMode = (req.query.conflict_mode as string) || bodyMode || 'skip_or_append';
+  const validModes = new Set(['skip_or_append', 'skip_or_overwrite']);
+  const conflictMode = validModes.has(rawMode) ? rawMode : 'skip_or_append';
 
   // Check write scope
   if (req.token!.permissions === 'write' && req.token!.write_sources) {
@@ -192,7 +197,7 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
     const ts = timestamp || new Date().toISOString();
     const meta = metadata ? JSON.stringify(metadata) : null;
 
-    // SCD Type 2 upsert logic
+    // SCD Type 2 upsert logic with conflict_mode
     if (external_id) {
       // Look for an existing current version with same external_id + source_id
       const existing = await client.query(
@@ -205,32 +210,50 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
       if (existing.rows.length > 0) {
         const old = existing.rows[0];
 
-        // Content unchanged — skip, return existing row
+        // Content unchanged — always skip
         if (old.content === content) {
           await client.query('COMMIT');
           client.release();
 
-          // Fetch full row for response
           const fullRow = await pool.query(
             `SELECT m.*, s.name as source_name FROM messages m
              LEFT JOIN sources s ON m.source_id = s.id
              WHERE m.id = $1`,
             [old.id]
           );
-          res.status(200).json(fullRow.rows[0]);
+          res.status(200).json({ ...fullRow.rows[0], action: 'skipped', conflict_mode: conflictMode });
           return;
         }
 
-        // Content changed — close old version, insert new version
-        const now = new Date().toISOString();
+        if (conflictMode === 'skip_or_overwrite') {
+          // Overwrite: UPDATE in-place
+          await client.query(
+            `UPDATE messages SET content = $1, metadata = $2, sender = COALESCE($3, sender),
+             recipient = COALESCE($4, recipient), updated_at = NOW()
+             WHERE id = $5 AND effective_to IS NULL`,
+            [content, meta, sender, recipient, old.id]
+          );
 
-        // Close old row
+          await client.query('COMMIT');
+          client.release();
+
+          const fullRow = await pool.query(
+            `SELECT m.*, s.name as source_name FROM messages m
+             LEFT JOIN sources s ON m.source_id = s.id
+             WHERE m.id = $1`,
+            [old.id]
+          );
+          res.status(200).json({ ...fullRow.rows[0], action: 'overwritten', conflict_mode: conflictMode });
+          return;
+        }
+
+        // Default: append (SCD Type 2)
+        const now = new Date().toISOString();
         await client.query(
           `UPDATE messages SET effective_to = $1 WHERE id = $2`,
           [now, old.id]
         );
 
-        // Insert new version with same record_id
         const result = await client.query(
           `INSERT INTO messages (source_id, sender, recipient, content, timestamp, external_id, metadata, record_id, effective_from)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
@@ -240,10 +263,7 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
         await client.query('COMMIT');
         client.release();
 
-        const newRow = result.rows[0];
-        res.status(201).json(newRow);
-
-
+        res.status(201).json({ ...result.rows[0], action: 'appended', conflict_mode: conflictMode });
         return;
       }
     }
@@ -258,7 +278,7 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
     await client.query('COMMIT');
     client.release();
 
-    res.status(201).json(result.rows[0]);
+    res.status(201).json({ ...result.rows[0], action: 'inserted', conflict_mode: conflictMode });
 
   } catch (err: any) {
     await client.query('ROLLBACK').catch(() => {});
@@ -266,8 +286,6 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
 
     // Handle unique constraint violation for concurrent inserts with same external_id
     if (err.code === '23505' && external_id) {
-      // Retry: another request inserted the same external_id concurrently
-      // Return the existing row
       try {
         const existingResult = await pool.query(
           `SELECT m.*, s.name as source_name FROM messages m
@@ -277,7 +295,7 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
           [external_id, source]
         );
         if (existingResult.rows.length > 0) {
-          res.status(200).json(existingResult.rows[0]);
+          res.status(200).json({ ...existingResult.rows[0], action: 'skipped', conflict_mode: conflictMode });
           return;
         }
       } catch {}
