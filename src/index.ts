@@ -25,6 +25,14 @@ async function bootstrap() {
     )
   `);
 
+  // Run base schema migration (creates sources, messages, people if not exist)
+  const baseSchemaMigrationPath = path.join(__dirname, '../migrations/000-base-schema.sql');
+  if (fs.existsSync(baseSchemaMigrationPath)) {
+    const baseSchemaSql = fs.readFileSync(baseSchemaMigrationPath, 'utf8');
+    await pool.query(baseSchemaSql);
+    console.log('✅ Base schema migration applied');
+  }
+
   // Run embedding migration
   const embeddingMigrationPath = path.join(__dirname, '../migrations/002-add-embedding.sql');
   const embeddingMigrationSql = fs.readFileSync(embeddingMigrationPath, 'utf8');
