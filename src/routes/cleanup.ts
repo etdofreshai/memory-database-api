@@ -316,4 +316,59 @@ router.delete('/delete', requireAuth('admin'), async (req, res) => {
   }
 });
 
+/**
+ * GET /api/cleanup/orphaned-attachments
+ */
+router.get('/orphaned-attachments', requireAuth('admin'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        COUNT(*)::int as count,
+        COALESCE(SUM(a.size_bytes), 0)::bigint as total_bytes,
+        COUNT(CASE WHEN a.mime_type ILIKE 'image/%' THEN 1 END)::int as images,
+        COUNT(CASE WHEN a.mime_type ILIKE 'video/%' THEN 1 END)::int as videos,
+        COUNT(CASE WHEN a.mime_type ILIKE 'audio/%' THEN 1 END)::int as audio,
+        COUNT(CASE WHEN a.mime_type NOT ILIKE 'image/%' AND a.mime_type NOT ILIKE 'video/%' AND a.mime_type NOT ILIKE 'audio/%' THEN 1 END)::int as other
+      FROM current_attachments a
+      WHERE NOT EXISTS (
+        SELECT 1 FROM current_message_attachment_links mal
+        WHERE mal.attachment_record_id = a.record_id
+      )
+    `);
+    const row = result.rows[0];
+    res.json({
+      count: row.count,
+      total_bytes: Number(row.total_bytes),
+      images: row.images,
+      videos: row.videos,
+      audio: row.audio,
+      other: row.other,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/cleanup/orphaned-attachments
+ */
+router.delete('/orphaned-attachments', requireAuth('admin'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      DELETE FROM attachments
+      WHERE record_id IN (
+        SELECT a.record_id FROM current_attachments a
+        WHERE NOT EXISTS (
+          SELECT 1 FROM current_message_attachment_links mal
+          WHERE mal.attachment_record_id = a.record_id
+        )
+      )
+    `);
+    res.json({ deleted: result.rowCount ?? 0 });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
+
