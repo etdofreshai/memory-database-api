@@ -15,16 +15,20 @@ import enrichmentsRouter from './routes/enrichments.js';
 import cleanupRouter from './routes/cleanup.js';
 import discordChannelsRouter from './routes/discord-channels.js';
 import chatgptRouter from './routes/chatgpt.js';
+import imessageRouter from './routes/imessage.js';
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-// Serve tokens admin UI
+// Serve static UI pages
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 app.get('/tokens', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'tokens.html'));
+});
+app.get('/imessage', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'imessage.html'));
 });
 
 // API routes
@@ -41,6 +45,7 @@ app.use('/api/links', linksRouter);
 app.use('/api/cleanup', cleanupRouter);
 app.use('/api/discord/channels', discordChannelsRouter);
 app.use('/api/chatgpt', chatgptRouter);
+app.use('/api/imessage', imessageRouter);
 
 export { app };
 export default app;

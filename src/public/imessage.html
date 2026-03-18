@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>iMessage Viewer</title>
+<style>
+:root {
+  --bg-primary: #000000;
+  --bg-secondary: #1C1C1E;
+  --bg-tertiary: #2C2C2E;
+  --bg-conversation-hover: #2C2C2E;
+  --bg-conversation-selected: #3A3A3C;
+  --text-primary: #FFFFFF;
+  --text-secondary: #8E8E93;
+  --text-tertiary: #636366;
+  --border-color: #38383A;
+  --sent-bubble: #007AFF;
+  --received-bubble: #3A3A3C;
+  --sent-text: #FFFFFF;
+  --received-text: #FFFFFF;
+  --search-bg: #1C1C1E;
+  --separator: #38383A;
+  --link-color: #0A84FF;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Auth overlay */
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.auth-overlay.hidden { display: none; }
+
+.auth-box {
+  background: var(--bg-secondary);
+  border-radius: 16px;
+  padding: 32px;
+  width: 340px;
+  text-align: center;
+}
+
+.auth-box h2 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.auth-box p {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+
+.auth-box input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 15px;
+  outline: none;
+  margin-bottom: 12px;
+}
+
+.auth-box input:focus {
+  border-color: var(--sent-bubble);
+}
+
+.auth-box button {
+  width: 100%;
+  padding: 10px;
+  background: var(--sent-bubble);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-box button:hover { opacity: 0.9; }
+
+.auth-error {
+  color: #FF453A;
+  font-size: 13px;
+  margin-top: 8px;
+  display: none;
+}
+
+/* Main layout */
+.app {
+  display: flex;
+  height: 100vh;
+}
+
+/* Left panel - conversation list */
+.conversations-panel {
+  width: 380px;
+  min-width: 320px;
+  max-width: 380px;
+  background: var(--bg-primary);
+  border-right: 1px solid var(--separator);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.conversations-header {
+  padding: 16px 16px 8px;
+  flex-shrink: 0;
+}
+
+.conversations-header h1 {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  margin-bottom: 12px;
+}
+
+.search-bar {
+  position: relative;
+  margin-bottom: 4px;
+}
+
+.search-bar input {
+  width: 100%;
+  padding: 8px 12px 8px 32px;
+  background: var(--search-bg);
+  border: none;
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 15px;
+  outline: none;
+}
+
+.search-bar input::placeholder {
+  color: var(--text-secondary);
+}
+
+.search-bar .search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.conversation-list {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-tertiary) transparent;
+}
+
+.conversation-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.conversation-list::-webkit-scrollbar-thumb {
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+}
+
+.conversation-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--separator);
+  transition: background 0.15s;
+  gap: 12px;
+}
+
+.conversation-item:hover {
+  background: var(--bg-conversation-hover);
+}
+
+.conversation-item.selected {
+  background: var(--bg-conversation-selected);
+}
+
+.conversation-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #5856D6, #AF52DE);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+  color: white;
+  flex-shrink: 0;
+}
+
+.conversation-avatar.group {
+  background: linear-gradient(135deg, #34C759, #30D158);
+  font-size: 14px;
+}
+
+.conversation-info {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.conversation-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.conversation-name {
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conversation-time {
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.conversation-preview {
+  font-size: 14px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.conversation-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+}
+
+.loading-indicator {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+/* Right panel - chat view */
+.chat-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  height: 100vh;
+}
+
+.chat-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 17px;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 20px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--separator);
+  flex-shrink: 0;
+  gap: 10px;
+}
+
+.chat-header-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #5856D6, #AF52DE);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+}
+
+.chat-header-avatar.group {
+  background: linear-gradient(135deg, #34C759, #30D158);
+  font-size: 11px;
+}
+
+.chat-header-name {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.chat-header-info {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-tertiary) transparent;
+}
+
+.chat-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-messages::-webkit-scrollbar-thumb {
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+}
+
+/* Date dividers */
+.date-divider {
+  text-align: center;
+  padding: 12px 0 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  position: relative;
+}
+
+/* Message bubbles */
+.message-row {
+  display: flex;
+  flex-direction: column;
+  max-width: 70%;
+  margin-bottom: 1px;
+}
+
+.message-row.sent {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.message-row.received {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.message-row.received .message-sender-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+  margin-left: 12px;
+}
+
+.message-bubble {
+  padding: 8px 14px;
+  border-radius: 18px;
+  font-size: 16px;
+  line-height: 1.35;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  position: relative;
+  max-width: 100%;
+}
+
+.message-row.sent .message-bubble {
+  background: var(--sent-bubble);
+  color: var(--sent-text);
+  border-bottom-right-radius: 4px;
+}
+
+.message-row.received .message-bubble {
+  background: var(--received-bubble);
+  color: var(--received-text);
+  border-bottom-left-radius: 4px;
+}
+
+/* Sequential messages from same sender: tighten radius */
+.message-row.sent.continuation .message-bubble {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+.message-row.sent.last-in-group .message-bubble {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 18px;
+}
+
+.message-row.received.continuation .message-bubble {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.message-row.received.last-in-group .message-bubble {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 18px;
+}
+
+.message-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  padding: 0 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.message-row:hover .message-time {
+  opacity: 1;
+}
+
+/* Attachments */
+.attachment-container {
+  margin-top: 4px;
+}
+
+.attachment-image {
+  max-width: 280px;
+  max-height: 300px;
+  border-radius: 14px;
+  cursor: pointer;
+  display: block;
+}
+
+.attachment-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 12px;
+  color: var(--link-color);
+  text-decoration: none;
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+.attachment-file:hover { background: rgba(255,255,255,0.15); }
+
+.attachment-file .file-icon {
+  font-size: 20px;
+}
+
+/* Load more */
+.load-more-bar {
+  text-align: center;
+  padding: 8px;
+  flex-shrink: 0;
+}
+
+.load-more-btn {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: none;
+  border-radius: 8px;
+  padding: 6px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.load-more-btn:hover { background: var(--bg-conversation-selected); }
+.load-more-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* Image lightbox */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  cursor: pointer;
+}
+
+.lightbox.hidden { display: none; }
+
+.lightbox img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 8px;
+}
+
+/* Status bar area */
+.conversations-status {
+  padding: 8px 16px;
+  border-top: 1px solid var(--separator);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .conversations-panel {
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+  }
+  .chat-panel { display: none; }
+  .app.chat-open .conversations-panel { display: none; }
+  .app.chat-open .chat-panel { display: flex; }
+  .chat-header { justify-content: flex-start; }
+  .chat-back-btn { display: inline-flex; }
+}
+
+.chat-back-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--sent-bubble);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+  margin-right: 4px;
+}
+
+/* Empty state for no messages */
+.chat-no-messages {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 15px;
+}
+</style>
+</head>
+<body>
+
+<!-- Auth overlay -->
+<div class="auth-overlay" id="authOverlay">
+  <div class="auth-box">
+    <h2>💬 iMessage Viewer</h2>
+    <p>Enter your API token to view messages</p>
+    <input type="password" id="tokenInput" placeholder="API Token" autofocus>
+    <button onclick="authenticate()">Continue</button>
+    <div class="auth-error" id="authError">Invalid token</div>
+  </div>
+</div>
+
+<!-- Main app -->
+<div class="app" id="app">
+  <!-- Left panel -->
+  <div class="conversations-panel">
+    <div class="conversations-header">
+      <h1>Messages</h1>
+      <div class="search-bar">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" placeholder="Search conversations...">
+      </div>
+    </div>
+    <div class="conversation-list" id="conversationList">
+      <div class="loading-indicator">Loading conversations...</div>
+    </div>
+    <div class="conversations-status" id="conversationsStatus"></div>
+  </div>
+
+  <!-- Right panel -->
+  <div class="chat-panel" id="chatPanel">
+    <div class="chat-empty" id="chatEmpty">
+      <div style="text-align:center">
+        <div style="font-size:48px;margin-bottom:12px">💬</div>
+        <div>Select a conversation to view messages</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox -->
+<div class="lightbox hidden" id="lightbox" onclick="closeLightbox()">
+  <img id="lightboxImg" src="">
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+let TOKEN = localStorage.getItem('imessage_token') || '';
+let contacts = {};
+let currentConversationId = null;
+let conversationsData = [];
+let messagesData = [];
+let messageOffset = 0;
+const MESSAGE_PAGE_SIZE = 100;
+
+// Auth
+async function authenticate() {
+  const input = document.getElementById('tokenInput');
+  const token = input.value.trim();
+  if (!token) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/imessage/conversations?limit=1`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error('Invalid token');
+    TOKEN = token;
+    localStorage.setItem('imessage_token', token);
+    document.getElementById('authOverlay').classList.add('hidden');
+    init();
+  } catch (e) {
+    document.getElementById('authError').style.display = 'block';
+  }
+}
+
+// Check saved token
+async function checkSavedToken() {
+  if (!TOKEN) return false;
+  try {
+    const res = await fetch(`${API_BASE}/api/imessage/conversations?limit=1`, {
+      headers: { 'Authorization': `Bearer ${TOKEN}` }
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+// Also support ?token= query param
+function getQueryToken() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('token') || '';
+}
+
+// API helpers
+async function api(path) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { 'Authorization': `Bearer ${TOKEN}` }
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// Get display name for a contact
+function getDisplayName(identifier) {
+  if (!identifier) return 'Unknown';
+  if (identifier === 'me') return 'Me';
+  if (contacts[identifier]) return contacts[identifier];
+  // Try to clean up phone numbers
+  if (identifier.startsWith('+1') && identifier.length === 12) {
+    const cleaned = identifier.slice(2);
+    return `(${cleaned.slice(0,3)}) ${cleaned.slice(3,6)}-${cleaned.slice(6)}`;
+  }
+  if (identifier.startsWith('chat')) {
+    return 'Group Chat';
+  }
+  return identifier;
+}
+
+// Get initials for avatar
+function getInitials(name) {
+  if (!name) return '?';
+  if (name.startsWith('(')) return '📱'; // Phone number
+  if (name === 'Group Chat') return '👥';
+  const parts = name.split(' ').filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length-1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+// Format timestamp
+function formatTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const diffMs = now - d;
+  const diffDays = Math.floor(diffMs / (1000*60*60*24));
+
+  if (diffDays === 0) {
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } else if (diffDays === 1) {
+    return 'Yesterday';
+  } else if (diffDays < 7) {
+    return d.toLocaleDateString([], { weekday: 'short' });
+  } else {
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  }
+}
+
+function formatMessageTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function formatDateDivider(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const msgDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffDays = Math.round((today - msgDate) / (1000*60*60*24));
+
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return d.toLocaleDateString([], { weekday: 'long' });
+  if (d.getFullYear() === now.getFullYear()) {
+    return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+  }
+  return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+// Load contacts
+async function loadContacts() {
+  try {
+    const data = await api('/api/imessage/contacts');
+    contacts = data.contacts || {};
+  } catch (e) {
+    console.warn('Could not load contacts:', e);
+  }
+}
+
+// Load conversations
+let searchTimeout = null;
+async function loadConversations(query = '') {
+  const list = document.getElementById('conversationList');
+  list.innerHTML = '<div class="loading-indicator">Loading...</div>';
+
+  try {
+    const q = query ? `&q=${encodeURIComponent(query)}` : '';
+    const data = await api(`/api/imessage/conversations?limit=200${q}`);
+    conversationsData = data.conversations || [];
+    renderConversations();
+    document.getElementById('conversationsStatus').textContent =
+      `${data.total || conversationsData.length} conversation${(data.total || conversationsData.length) !== 1 ? 's' : ''}`;
+  } catch (e) {
+    list.innerHTML = `<div class="loading-indicator" style="color:#FF453A">Error: ${e.message}</div>`;
+  }
+}
+
+function renderConversations() {
+  const list = document.getElementById('conversationList');
+  if (conversationsData.length === 0) {
+    list.innerHTML = '<div class="loading-indicator">No conversations found</div>';
+    return;
+  }
+
+  list.innerHTML = conversationsData.map(conv => {
+    const name = conv.display_name || getDisplayName(conv.conversation_id);
+    const initials = getInitials(name);
+    const isGroup = conv.is_group;
+    const time = formatTime(conv.last_timestamp);
+    const preview = conv.last_message
+      ? (conv.last_sender === 'me' ? 'You: ' : '') + conv.last_message
+      : '📎 Attachment';
+    const selected = conv.conversation_id === currentConversationId ? 'selected' : '';
+
+    return `
+      <div class="conversation-item ${selected}"
+           onclick="selectConversation('${escapeAttr(conv.conversation_id)}')">
+        <div class="conversation-avatar ${isGroup ? 'group' : ''}">${initials}</div>
+        <div class="conversation-info">
+          <div class="conversation-top-row">
+            <div class="conversation-name">${escapeHtml(name)}</div>
+            <div class="conversation-time">${escapeHtml(time)}</div>
+          </div>
+          <div class="conversation-preview">${escapeHtml(truncate(preview, 60))}</div>
+          <div class="conversation-count">${conv.message_count} message${conv.message_count !== 1 ? 's' : ''}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// Select conversation
+async function selectConversation(conversationId) {
+  currentConversationId = conversationId;
+  messageOffset = 0;
+  messagesData = [];
+
+  // Update selection in list
+  document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('selected'));
+  const items = document.querySelectorAll('.conversation-item');
+  items.forEach(el => {
+    if (el.getAttribute('onclick')?.includes(conversationId)) {
+      el.classList.add('selected');
+    }
+  });
+
+  // Mobile: show chat panel
+  document.getElementById('app').classList.add('chat-open');
+
+  await loadMessages(conversationId, true);
+}
+
+async function loadMessages(conversationId, initial = false) {
+  const panel = document.getElementById('chatPanel');
+  const conv = conversationsData.find(c => c.conversation_id === conversationId);
+  const name = conv?.display_name || getDisplayName(conversationId);
+  const isGroup = conv?.is_group || false;
+  const initials = getInitials(name);
+
+  if (initial) {
+    panel.innerHTML = `
+      <div class="chat-header">
+        <button class="chat-back-btn" onclick="goBack()">‹</button>
+        <div class="chat-header-avatar ${isGroup ? 'group' : ''}">${initials}</div>
+        <div>
+          <div class="chat-header-name">${escapeHtml(name)}</div>
+          ${conv ? `<div class="chat-header-info">${conv.message_count} messages</div>` : ''}
+        </div>
+      </div>
+      <div id="loadMoreBar" class="load-more-bar" style="display:none">
+        <button class="load-more-btn" onclick="loadOlderMessages()">Load older messages</button>
+      </div>
+      <div class="chat-messages" id="chatMessages">
+        <div class="loading-indicator">Loading messages...</div>
+      </div>
+    `;
+  }
+
+  try {
+    const data = await api(`/api/imessage/messages/${encodeURIComponent(conversationId)}?limit=${MESSAGE_PAGE_SIZE}&offset=${messageOffset}`);
+    const newMessages = data.messages || [];
+
+    if (initial) {
+      messagesData = newMessages;
+    } else {
+      // Prepend older messages
+      messagesData = [...newMessages, ...messagesData];
+    }
+
+    renderMessages(isGroup);
+
+    // Show/hide load more
+    const loadMoreBar = document.getElementById('loadMoreBar');
+    if (loadMoreBar) {
+      loadMoreBar.style.display = (data.total > messagesData.length) ? 'block' : 'none';
+    }
+
+    if (initial) {
+      // Scroll to bottom
+      const chatEl = document.getElementById('chatMessages');
+      if (chatEl) {
+        requestAnimationFrame(() => {
+          chatEl.scrollTop = chatEl.scrollHeight;
+        });
+      }
+    }
+  } catch (e) {
+    const chatEl = document.getElementById('chatMessages');
+    if (chatEl) {
+      chatEl.innerHTML = `<div class="loading-indicator" style="color:#FF453A">Error: ${e.message}</div>`;
+    }
+  }
+}
+
+async function loadOlderMessages() {
+  messageOffset += MESSAGE_PAGE_SIZE;
+  const chatEl = document.getElementById('chatMessages');
+  const prevHeight = chatEl?.scrollHeight || 0;
+
+  await loadMessages(currentConversationId, false);
+
+  // Maintain scroll position
+  if (chatEl) {
+    requestAnimationFrame(() => {
+      chatEl.scrollTop = chatEl.scrollHeight - prevHeight;
+    });
+  }
+}
+
+function renderMessages(isGroup) {
+  const container = document.getElementById('chatMessages');
+  if (!container) return;
+
+  if (messagesData.length === 0) {
+    container.innerHTML = '<div class="chat-no-messages">No messages</div>';
+    return;
+  }
+
+  let html = '';
+  let lastDate = '';
+  let lastSender = '';
+
+  messagesData.forEach((msg, idx) => {
+    const msgDate = formatDateDivider(msg.timestamp);
+    if (msgDate !== lastDate) {
+      html += `<div class="date-divider">${escapeHtml(msgDate)}</div>`;
+      lastDate = msgDate;
+      lastSender = ''; // Reset grouping after date divider
+    }
+
+    const isSent = msg.sender === 'me';
+    const direction = isSent ? 'sent' : 'received';
+    const sameSender = msg.sender === lastSender;
+    const nextMsg = messagesData[idx + 1];
+    const nextSameSender = nextMsg && nextMsg.sender === msg.sender && formatDateDivider(nextMsg.timestamp) === msgDate;
+
+    let groupClass = '';
+    if (sameSender && nextSameSender) groupClass = 'continuation';
+    else if (sameSender && !nextSameSender) groupClass = 'last-in-group continuation';
+    else if (!sameSender && nextSameSender) groupClass = ''; // First in group
+    // else: standalone message, no extra class
+
+    // Sender label for group chats (received messages)
+    let senderLabel = '';
+    if (isGroup && !isSent && !sameSender) {
+      const senderName = getDisplayName(msg.sender);
+      senderLabel = `<div class="message-sender-label">${escapeHtml(senderName)}</div>`;
+    }
+
+    // Message content
+    let bubbleContent = '';
+    if (msg.content) {
+      bubbleContent = `<div class="message-bubble">${linkify(escapeHtml(msg.content))}</div>`;
+    }
+
+    // Attachments
+    let attachmentHtml = '';
+    if (msg.attachments && msg.attachments.length > 0) {
+      attachmentHtml = msg.attachments.map(att => {
+        const url = `${API_BASE}/api/attachments/${att.record_id}/file?token=${TOKEN}`;
+        if (att.mime_type?.startsWith('image/')) {
+          return `<div class="attachment-container">
+            <img class="attachment-image" src="${url}" alt="${escapeAttr(att.original_file_name || 'Image')}"
+                 onclick="openLightbox('${url}')" loading="lazy">
+          </div>`;
+        } else if (att.mime_type?.startsWith('video/')) {
+          return `<div class="attachment-container">
+            <video class="attachment-image" src="${url}" controls preload="metadata"
+                   style="border-radius:14px;max-width:280px"></video>
+          </div>`;
+        } else if (att.mime_type?.startsWith('audio/')) {
+          return `<div class="attachment-container">
+            <audio src="${url}" controls preload="metadata" style="max-width:280px"></audio>
+          </div>`;
+        } else {
+          const fname = att.original_file_name || 'File';
+          const icon = getFileIcon(att.mime_type);
+          return `<div class="attachment-container">
+            <a class="attachment-file" href="${url}" target="_blank">
+              <span class="file-icon">${icon}</span>
+              <span>${escapeHtml(truncate(fname, 30))}</span>
+            </a>
+          </div>`;
+        }
+      }).join('');
+    }
+
+    html += `
+      <div class="message-row ${direction} ${groupClass}">
+        ${senderLabel}
+        ${attachmentHtml}
+        ${bubbleContent}
+        <div class="message-time">${formatMessageTime(msg.timestamp)}</div>
+      </div>
+    `;
+
+    lastSender = msg.sender;
+  });
+
+  container.innerHTML = html;
+}
+
+function goBack() {
+  document.getElementById('app').classList.remove('chat-open');
+  currentConversationId = null;
+}
+
+// Lightbox
+function openLightbox(url) {
+  event.stopPropagation();
+  document.getElementById('lightboxImg').src = url;
+  document.getElementById('lightbox').classList.remove('hidden');
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox').classList.add('hidden');
+  document.getElementById('lightboxImg').src = '';
+}
+
+// Utility
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function escapeAttr(str) {
+  if (!str) return '';
+  return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function truncate(str, len) {
+  if (!str) return '';
+  return str.length > len ? str.slice(0, len) + '…' : str;
+}
+
+function linkify(text) {
+  return text.replace(
+    /(https?:\/\/[^\s<]+)/g,
+    '<a href="$1" target="_blank" style="color:inherit;text-decoration:underline">$1</a>'
+  );
+}
+
+function getFileIcon(mime) {
+  if (!mime) return '📄';
+  if (mime.includes('pdf')) return '📕';
+  if (mime.includes('zip') || mime.includes('compressed')) return '🗜️';
+  if (mime.includes('word') || mime.includes('document')) return '📝';
+  if (mime.includes('sheet') || mime.includes('excel')) return '📊';
+  if (mime.includes('presentation') || mime.includes('powerpoint')) return '📊';
+  return '📄';
+}
+
+// Search debounce
+document.getElementById('searchInput')?.addEventListener('input', (e) => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    loadConversations(e.target.value.trim());
+  }, 300);
+});
+
+// Keyboard shortcut: Escape to close lightbox
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeLightbox();
+  }
+});
+
+// Token input: enter to submit
+document.getElementById('tokenInput')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') authenticate();
+});
+
+// Init
+async function init() {
+  await loadContacts();
+  await loadConversations();
+}
+
+// Startup
+(async () => {
+  // Check query param token first
+  const queryToken = getQueryToken();
+  if (queryToken) {
+    TOKEN = queryToken;
+    localStorage.setItem('imessage_token', queryToken);
+  }
+
+  if (TOKEN && await checkSavedToken()) {
+    document.getElementById('authOverlay').classList.add('hidden');
+    init();
+  }
+})();
+</script>
+</body>
+</html>
