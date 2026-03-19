@@ -15,6 +15,7 @@ import cleanupRouter from './routes/cleanup.js';
 import discordChannelsRouter from './routes/discord-channels.js';
 import chatgptRouter from './routes/chatgpt.js';
 import imessageRouter from './routes/imessage.js';
+import subscriptionsRouter from './routes/subscriptions.js';
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use('/api/cleanup', cleanupRouter);
 app.use('/api/discord/channels', discordChannelsRouter);
 app.use('/api/chatgpt', chatgptRouter);
 app.use('/api/imessage', imessageRouter);
+app.use('/api/subscriptions', subscriptionsRouter);
 
 export { app };
 export default app;
