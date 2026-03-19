@@ -51,6 +51,14 @@ async function bootstrap() {
     console.log('✅ Attachments migration applied');
   }
 
+  // Run subscriptions migration
+  const subscriptionsMigrationPath = path.join(__dirname, '../migrations/009-subscriptions.sql');
+  if (fs.existsSync(subscriptionsMigrationPath)) {
+    const subscriptionsMigrationSql = fs.readFileSync(subscriptionsMigrationPath, 'utf8');
+    await pool.query(subscriptionsMigrationSql);
+    console.log('✅ Subscriptions migration applied');
+  }
+
   // Bootstrap admin token
   const adminTokenEnv = process.env.ADMIN_TOKEN;
   const existing = await pool.query("SELECT id, token FROM api_tokens WHERE label = 'Bootstrap Admin' AND permissions = 'admin' LIMIT 1");
