@@ -125,6 +125,24 @@ router.get('/:record_id/file', requireAuth('read', 'write', 'admin'), async (req
 
     const mime = row.mime_type || 'application/octet-stream';
     const filename = row.original_file_name || path.basename(resolved);
+    const isHeic = /^image\/heic/i.test(mime) || /\.heic$/i.test(filename);
+
+    // Convert HEIC to JPEG on the fly for browser compatibility
+    if (isHeic) {
+      try {
+        const sharp = (await import('sharp')).default;
+        const jpegBuffer = await sharp(resolved).jpeg({ quality: 85 }).toBuffer();
+        const jpegName = filename.replace(/\.heic$/i, '.jpg');
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Content-Length', jpegBuffer.length);
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(jpegName)}"`);
+        res.end(jpegBuffer);
+        return;
+      } catch (convErr: any) {
+        console.warn(`[attachments] HEIC conversion failed for ${record_id}, serving raw: ${convErr.message}`);
+        // Fall through to serve raw file
+      }
+    }
 
     res.setHeader('Content-Type', mime);
     res.setHeader('Content-Length', stat.size);
