@@ -130,8 +130,9 @@ router.get('/:record_id/file', requireAuth('read', 'write', 'admin'), async (req
     // Convert HEIC to JPEG on the fly for browser compatibility
     if (isHeic) {
       try {
-        const sharp = (await import('sharp')).default;
-        const jpegBuffer = await sharp(resolved).jpeg({ quality: 85 }).toBuffer();
+        const heicConvert = (await import('heic-convert')).default;
+        const inputBuffer = fs.readFileSync(resolved);
+        const jpegBuffer = Buffer.from(await heicConvert({ buffer: inputBuffer, format: 'JPEG', quality: 0.85 }));
         const jpegName = filename.replace(/\.heic$/i, '.jpg');
         res.setHeader('Content-Type', 'image/jpeg');
         res.setHeader('Content-Length', jpegBuffer.length);
