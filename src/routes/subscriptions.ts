@@ -54,7 +54,15 @@ router.get('/:service', requireAuth('read', 'write', 'admin'), async (req, res) 
       'SELECT * FROM current_subscriptions WHERE service = $1 ORDER BY server_name NULLS LAST, channel_name NULLS LAST',
       [service]
     );
-    res.json({ subscriptions: result.rows });
+
+    // Include auto_subscribe setting in response
+    const settingsResult = await pool.query(
+      'SELECT auto_subscribe FROM subscription_settings WHERE service = $1',
+      [service]
+    );
+    const autoSubscribe = settingsResult.rows.length > 0 ? settingsResult.rows[0].auto_subscribe : false;
+
+    res.json({ subscriptions: result.rows, auto_subscribe: autoSubscribe });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     res.status(500).json({ error: message });
