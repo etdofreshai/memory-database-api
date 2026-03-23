@@ -17,6 +17,8 @@ import chatgptRouter from './routes/chatgpt.js';
 import imessageRouter from './routes/imessage.js';
 import subscriptionSettingsRouter from './routes/subscription-settings.js';
 import subscriptionsRouter from './routes/subscriptions.js';
+import transactionsRouter from './routes/transactions.js';
+import tasksRouter from './routes/tasks.js';
 
 const app = express();
 
@@ -48,6 +50,8 @@ app.use('/api/chatgpt', chatgptRouter);
 app.use('/api/imessage', imessageRouter);
 app.use('/api/subscriptions/settings', subscriptionSettingsRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
+app.use('/api/transactions', transactionsRouter);
+app.use('/api/tasks', tasksRouter);
 
 export { app };
 export default app;
