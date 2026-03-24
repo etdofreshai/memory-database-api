@@ -67,6 +67,14 @@ async function bootstrap() {
     console.log('✅ Subscription settings migration applied');
   }
 
+  // Run transactions migration
+  const transactionsMigrationPath = path.join(__dirname, '../migrations/011-transactions.sql');
+  if (fs.existsSync(transactionsMigrationPath)) {
+    const transactionsMigrationSql = fs.readFileSync(transactionsMigrationPath, 'utf8');
+    await pool.query(transactionsMigrationSql);
+    console.log('✅ Transactions migration applied');
+  }
+
   // Run sync-state migration
   const syncStateMigrationPath = path.join(__dirname, '../migrations/013-sync-state.sql');
   if (fs.existsSync(syncStateMigrationPath)) {
