@@ -19,11 +19,12 @@ import subscriptionSettingsRouter from './routes/subscription-settings.js';
 import subscriptionsRouter from './routes/subscriptions.js';
 import transactionsRouter from './routes/transactions.js';
 import tasksRouter from './routes/tasks.js';
+import syncStateRouter from './routes/sync-state.js';
 
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Serve static UI pages
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,6 +53,7 @@ app.use('/api/subscriptions/settings', subscriptionSettingsRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
 app.use('/api/transactions', transactionsRouter);
 app.use('/api/tasks', tasksRouter);
+app.use('/api/sync-state', syncStateRouter);
 
 export { app };
 export default app;

@@ -248,4 +248,149 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
   }
 });
 
+// Ingestor-friendly summary stats
+router.get('/summary', requireAuth('read', 'write', 'admin'), async (_req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(*)::int as total,
+        COUNT(*) FILTER (WHERE date >= CURRENT_DATE - INTERVAL '30 days')::int as recent_30d,
+        COUNT(DISTINCT account_name)::int as distinct_accounts,
+        COUNT(DISTINCT category)::int as distinct_categories,
+        MIN(date) as earliest_date,
+        MAX(date) as latest_date
+      FROM current_transactions
+    `);
+    const row = result.rows[0];
+    res.json({
+      total: row.total,
+      recent_30d: row.recent_30d,
+      distinct_accounts: row.distinct_accounts,
+      distinct_categories: row.distinct_categories,
+      date_range: { earliest: row.earliest_date, latest: row.latest_date },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Batch upsert (for ingestor)
+router.post('/batch', requireAuth('write', 'admin'), async (req: AuthRequest, res) => {
+  const { transactions } = req.body;
+  if (!Array.isArray(transactions) || transactions.length === 0) {
+    res.status(400).json({ error: 'transactions array required' }); return;
+  }
+  if (transactions.length > 500) {
+    res.status(400).json({ error: 'Maximum 500 transactions per batch' }); return;
+  }
+
+  const results = { new: 0, updated: 0, skipped: 0 };
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Cache source_id lookups
+    const sourceCache = new Map<string, number>();
+
+    for (const txn of transactions) {
+      const {
+        source, external_id, date, amount, currency, merchant,
+        category, subcategory, account_name, account_type, transaction_type,
+        status, notes, tags, metadata
+      } = txn;
+      if (!date || amount === undefined) continue;
+
+      // Resolve source_id
+      let source_id: number | null = null as number | null;
+      if (source) {
+        if (sourceCache.has(source)) {
+          source_id = sourceCache.get(source)!;
+        } else {
+          let sourceResult = await client.query('SELECT id FROM sources WHERE name = $1', [source]);
+          if (sourceResult.rows.length === 0) {
+            sourceResult = await client.query('INSERT INTO sources (name) VALUES ($1) RETURNING id', [source]);
+          }
+          source_id = sourceResult.rows[0].id;
+          sourceCache.set(source, source_id!);
+        }
+      }
+
+      const tagsJson = tags ? JSON.stringify(tags) : '[]';
+      const metaJson = metadata ? JSON.stringify(metadata) : '{}';
+
+      if (external_id && source_id) {
+        const existing = await client.query(
+          `SELECT id, record_id, amount, merchant, category, subcategory, account_name, account_type,
+                  transaction_type, status, notes
+           FROM transactions
+           WHERE source_id = $1 AND external_id = $2 AND effective_to IS NULL AND is_active = TRUE
+           LIMIT 1`,
+          [source_id, external_id]
+        );
+
+        if (existing.rows.length > 0) {
+          const old = existing.rows[0];
+          const unchanged = (
+            String(old.amount) === String(amount) &&
+            old.merchant === (merchant || null) &&
+            old.category === (category || null) &&
+            old.subcategory === (subcategory || null) &&
+            old.account_name === (account_name || null) &&
+            old.account_type === (account_type || null) &&
+            old.transaction_type === (transaction_type || null) &&
+            old.status === (status || 'posted') &&
+            old.notes === (notes || null)
+          );
+
+          if (unchanged) {
+            results.skipped++;
+            continue;
+          }
+
+          const now = new Date().toISOString();
+          await client.query(`UPDATE transactions SET effective_to = $1, updated_at = NOW() WHERE id = $2`, [now, old.id]);
+          await client.query(
+            `INSERT INTO transactions (record_id, source_id, external_id, date, amount, currency, merchant,
+              category, subcategory, account_name, account_type, transaction_type, status, notes, tags, metadata, effective_from)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16::jsonb, $17)`,
+            [old.record_id, source_id, external_id, date, amount, currency || 'USD', merchant,
+             category, subcategory, account_name, account_type, transaction_type, status || 'posted',
+             notes, tagsJson, metaJson, now]
+          );
+          results.updated++;
+        } else {
+          await client.query(
+            `INSERT INTO transactions (source_id, external_id, date, amount, currency, merchant,
+              category, subcategory, account_name, account_type, transaction_type, status, notes, tags, metadata)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15::jsonb)`,
+            [source_id, external_id, date, amount, currency || 'USD', merchant,
+             category, subcategory, account_name, account_type, transaction_type, status || 'posted',
+             notes, tagsJson, metaJson]
+          );
+          results.new++;
+        }
+      } else {
+        await client.query(
+          `INSERT INTO transactions (source_id, external_id, date, amount, currency, merchant,
+            category, subcategory, account_name, account_type, transaction_type, status, notes, tags, metadata)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15::jsonb)`,
+          [source_id, external_id, date, amount, currency || 'USD', merchant,
+           category, subcategory, account_name, account_type, transaction_type, status || 'posted',
+           notes, tagsJson, metaJson]
+        );
+        results.new++;
+      }
+    }
+
+    await client.query('COMMIT');
+    client.release();
+    res.status(200).json({ results });
+  } catch (err: any) {
+    await client.query('ROLLBACK').catch(() => {});
+    client.release();
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

@@ -67,6 +67,14 @@ async function bootstrap() {
     console.log('✅ Subscription settings migration applied');
   }
 
+  // Run sync-state migration
+  const syncStateMigrationPath = path.join(__dirname, '../migrations/013-sync-state.sql');
+  if (fs.existsSync(syncStateMigrationPath)) {
+    const syncStateMigrationSql = fs.readFileSync(syncStateMigrationPath, 'utf8');
+    await pool.query(syncStateMigrationSql);
+    console.log('✅ Sync state migration applied');
+  }
+
   // Bootstrap admin token
   const adminTokenEnv = process.env.ADMIN_TOKEN;
   const existing = await pool.query("SELECT id, token FROM api_tokens WHERE label = 'Bootstrap Admin' AND permissions = 'admin' LIMIT 1");
