@@ -73,6 +73,32 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
   }
 });
 
+// Ingestor-friendly summary stats
+router.get('/summary', requireAuth('read', 'write', 'admin'), async (_req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(*)::int as total,
+        COUNT(*) FILTER (WHERE date >= CURRENT_DATE - INTERVAL '30 days')::int as recent_30d,
+        COUNT(DISTINCT account_name)::int as distinct_accounts,
+        COUNT(DISTINCT category)::int as distinct_categories,
+        MIN(date) as earliest_date,
+        MAX(date) as latest_date
+      FROM current_transactions
+    `);
+    const row = result.rows[0];
+    res.json({
+      total: row.total,
+      recent_30d: row.recent_30d,
+      distinct_accounts: row.distinct_accounts,
+      distinct_categories: row.distinct_categories,
+      date_range: { earliest: row.earliest_date, latest: row.latest_date },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Stats: aggregations by category, by month
 router.get('/stats', requireAuth('read', 'write', 'admin'), async (req, res) => {
   const { date_from, date_to, account_name } = req.query;
@@ -244,32 +270,6 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
   } catch (err: any) {
     await client.query('ROLLBACK').catch(() => {});
     client.release();
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Ingestor-friendly summary stats
-router.get('/summary', requireAuth('read', 'write', 'admin'), async (_req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT
-        COUNT(*)::int as total,
-        COUNT(*) FILTER (WHERE date >= CURRENT_DATE - INTERVAL '30 days')::int as recent_30d,
-        COUNT(DISTINCT account_name)::int as distinct_accounts,
-        COUNT(DISTINCT category)::int as distinct_categories,
-        MIN(date) as earliest_date,
-        MAX(date) as latest_date
-      FROM current_transactions
-    `);
-    const row = result.rows[0];
-    res.json({
-      total: row.total,
-      recent_30d: row.recent_30d,
-      distinct_accounts: row.distinct_accounts,
-      distinct_categories: row.distinct_categories,
-      date_range: { earliest: row.earliest_date, latest: row.latest_date },
-    });
-  } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
