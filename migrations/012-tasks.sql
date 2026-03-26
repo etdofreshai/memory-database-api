@@ -30,5 +30,5 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project);
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee);
 CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
 
-CREATE VIEW current_tasks AS
+CREATE OR REPLACE VIEW current_tasks AS
   SELECT * FROM tasks WHERE effective_to IS NULL AND is_active = TRUE;

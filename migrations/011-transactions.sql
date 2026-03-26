@@ -29,5 +29,5 @@ CREATE INDEX IF NOT EXISTS idx_transactions_external ON transactions(source_id, 
 CREATE INDEX IF NOT EXISTS idx_transactions_merchant ON transactions(merchant);
 CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category);
 
-CREATE VIEW current_transactions AS
+CREATE OR REPLACE VIEW current_transactions AS
   SELECT * FROM transactions WHERE effective_to IS NULL AND is_active = TRUE;
