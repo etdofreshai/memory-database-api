@@ -201,7 +201,7 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
     if (external_id) {
       // Look for an existing current version with same external_id + source_id
       const existing = await client.query(
-        `SELECT id, record_id, content FROM messages
+        `SELECT id, record_id, content, metadata FROM messages
          WHERE source_id = $1 AND external_id = $2 AND effective_to IS NULL
          LIMIT 1`,
         [source_id, external_id]
@@ -210,8 +210,8 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
       if (existing.rows.length > 0) {
         const old = existing.rows[0];
 
-        // Content unchanged — always skip
-        if (old.content === content) {
+        // Content and metadata unchanged — skip
+        if (old.content === content && JSON.stringify(old.metadata) === JSON.stringify(metadata)) {
           await client.query('COMMIT');
           client.release();
 
