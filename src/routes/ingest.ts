@@ -182,9 +182,10 @@ router.post('/', requireAuth('write', 'admin'), upload.array('files', MAX_FILES)
 
     if (existing) {
       const contentIdentical = (existing.content ?? null) === (content ?? null);
+      const metadataIdentical = JSON.stringify(existing.metadata ?? null) === JSON.stringify(metaObj ?? null);
 
-      if (contentIdentical) {
-        // Content identical → always skip
+      if (contentIdentical && metadataIdentical) {
+        // Content and metadata identical → always skip
         messageRow = existing;
         messageAction = 'skipped';
       } else if (conflictMode === 'skip_or_overwrite') {
