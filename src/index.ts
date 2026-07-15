@@ -25,6 +25,11 @@ async function bootstrap() {
     )
   `);
 
+  // Deployments that already manage migrations separately can skip these
+  // idempotent schema checks. Some PostgreSQL maintenance operations hold
+  // relation locks long enough to otherwise prevent the API from restarting.
+  const runMigrations = process.env.SKIP_MIGRATIONS !== 'true';
+  if (runMigrations) {
   // Run base schema migration (creates sources, messages, people if not exist)
   const baseSchemaMigrationPath = path.join(__dirname, '../migrations/000-base-schema.sql');
   if (fs.existsSync(baseSchemaMigrationPath)) {
@@ -81,6 +86,9 @@ async function bootstrap() {
     const syncStateMigrationSql = fs.readFileSync(syncStateMigrationPath, 'utf8');
     await pool.query(syncStateMigrationSql);
     console.log('✅ Sync state migration applied');
+  }
+  } else {
+    console.log('⏭️  Startup migrations skipped (SKIP_MIGRATIONS=true)');
   }
 
   // Bootstrap admin token
