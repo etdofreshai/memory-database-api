@@ -27,6 +27,10 @@ DATABASE_URL=postgresql://... npm start
 - `GET /api/messages/vector-search` — pgvector similarity search
 - `POST /api/messages` — Create message (write token)
 - `POST /api/messages/ingest` — Ingest message + attachments (multipart, write token)
+
+Message writes accept `conflict_mode=skip_existing|skip_or_append|skip_or_overwrite`.
+Use `skip_existing` for insert-only ingestors: an existing `(source, external_id)`
+is returned unchanged, regardless of content or metadata differences.
 - `GET /api/sources` — List sources
 - `GET /api/people` — List people
 - `GET/POST/PATCH/DELETE /api/admin/tokens` — Token management (admin)

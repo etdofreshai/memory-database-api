@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { isDeepStrictEqual } from 'node:util';
 import pool from '../db.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 
@@ -173,7 +174,7 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
 
   // Parse conflict_mode from query param or body field
   const rawMode = (req.query.conflict_mode as string) || bodyMode || 'skip_or_append';
-  const validModes = new Set(['skip_or_append', 'skip_or_overwrite']);
+  const validModes = new Set(['skip_existing', 'skip_or_append', 'skip_or_overwrite']);
   const conflictMode = validModes.has(rawMode) ? rawMode : 'skip_or_append';
 
   // Check write scope
@@ -210,8 +211,12 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
       if (existing.rows.length > 0) {
         const old = existing.rows[0];
 
-        // Content and metadata unchanged — skip
-        if (old.content === content && JSON.stringify(old.metadata) === JSON.stringify(metadata)) {
+        // Insert-only mode never mutates or versions an existing identity.
+        // Deep comparison also avoids false changes from JSONB key reordering.
+        if (
+          conflictMode === 'skip_existing' ||
+          (old.content === content && isDeepStrictEqual(old.metadata ?? null, metadata ?? null))
+        ) {
           await client.query('COMMIT');
           client.release();
 

@@ -3,6 +3,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { isDeepStrictEqual } from 'node:util';
 import pool from '../db.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 
@@ -47,9 +48,9 @@ function computeSha256(buffer: Buffer): string {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
-type ConflictMode = 'skip_or_append' | 'skip_or_overwrite';
+type ConflictMode = 'skip_existing' | 'skip_or_append' | 'skip_or_overwrite';
 
-const VALID_CONFLICT_MODES = new Set<ConflictMode>(['skip_or_append', 'skip_or_overwrite']);
+const VALID_CONFLICT_MODES = new Set<ConflictMode>(['skip_existing', 'skip_or_append', 'skip_or_overwrite']);
 
 /**
  * Find an existing message by identity key.
@@ -182,7 +183,24 @@ router.post('/', requireAuth('write', 'admin'), upload.array('files', MAX_FILES)
 
     if (existing) {
       const contentIdentical = (existing.content ?? null) === (content ?? null);
-      const metadataIdentical = JSON.stringify(existing.metadata ?? null) === JSON.stringify(metaObj ?? null);
+      const metadataIdentical = isDeepStrictEqual(existing.metadata ?? null, metaObj ?? null);
+
+      if (conflictMode === 'skip_existing') {
+        await client.query('COMMIT');
+        client.release();
+        res.status(200).json({
+          message: {
+            id: existing.id,
+            record_id: existing.record_id,
+            source,
+            content: existing.content,
+            action: 'skipped',
+          },
+          attachments: [],
+          conflict_mode: conflictMode,
+        });
+        return;
+      }
 
       if (contentIdentical && metadataIdentical) {
         // Content and metadata identical → always skip

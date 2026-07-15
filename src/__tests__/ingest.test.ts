@@ -190,6 +190,52 @@ describe('POST /api/messages/ingest', () => {
     try { fs.unlinkSync(res1.body.attachments[0].storage_path); } catch {}
   });
 
+  it('skip_existing never changes or versions an existing message', async () => {
+    const externalId = `insert-only-${Date.now()}`;
+    const timestamp = new Date().toISOString();
+    const first = {
+      source: 'test',
+      sender: 'tester',
+      content: 'original content',
+      timestamp,
+      external_id: externalId,
+      metadata: { z: 1, a: 2 },
+    };
+    const changed = {
+      ...first,
+      content: 'changed content that must not be stored',
+      metadata: { a: 99, z: 1 },
+    };
+
+    const inserted = await request(app)
+      .post('/api/messages/ingest?conflict_mode=skip_existing')
+      .set('Authorization', `Bearer ${token}`)
+      .field('message', JSON.stringify(first));
+    expect(inserted.status).toBe(201);
+
+    const skipped = await request(app)
+      .post('/api/messages/ingest?conflict_mode=skip_existing')
+      .set('Authorization', `Bearer ${token}`)
+      .field('message', JSON.stringify(changed));
+    expect(skipped.status).toBe(200);
+    expect(skipped.body.message.action).toBe('skipped');
+    expect(skipped.body.conflict_mode).toBe('skip_existing');
+    expect(skipped.body.attachments).toEqual([]);
+
+    const rows = await pool.query(
+      `SELECT content, metadata, effective_to
+         FROM messages
+        WHERE source_id = (SELECT id FROM sources WHERE name = 'test')
+          AND external_id = $1
+        ORDER BY id`,
+      [externalId]
+    );
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0].content).toBe('original content');
+    expect(rows.rows[0].metadata).toEqual({ a: 2, z: 1 });
+    expect(rows.rows[0].effective_to).toBeNull();
+  });
+
   it('returns 401 without auth', async () => {
     const res = await request(app)
       .post('/api/messages/ingest')
