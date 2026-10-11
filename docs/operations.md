@@ -19,6 +19,20 @@ referenced attachment paths and byte sizes against the database manifest.
 These checks are not a full restore drill. A full restore into an
 isolated database should be identified separately when performed.
 
+Ingestor checkpoints and provider sessions are backed up separately from the
+database snapshot. After restoring, rewind each collector to the database
+snapshot start time (with overlap), or replay its durable source events using
+stable external IDs. Restoring a newer checkpoint without replay can skip
+records written after the database snapshot. Keep a protected copy of the old
+checkpoint before changing it. Do not restore API credentials into a public
+test service.
+
+An archive made before this upgrade does not contain migration 014 or search
+passages. Restore with the previous API image, or reapply 014 and rebuild search
+before enabling the new read routes. Retain the old image until recovery has
+been verified. A second copy on another LAN host protects against one disk or
+machine failing; it does not protect against a site-wide loss.
+
 ## Search upgrade
 
 Apply `migrations/014-memory-read.sql` with psql and `ON_ERROR_STOP=1`, outside a
