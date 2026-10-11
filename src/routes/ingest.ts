@@ -56,8 +56,8 @@ const VALID_CONFLICT_MODES = new Set<ConflictMode>(['skip_existing', 'skip_or_ap
  * Find an existing message by identity key.
  * Uses two strategies:
  *   1. source_id + metadata->>'provider_message_id' (if set)
- *   2. source_id + sender + recipient + timestamp (to the second)
- * Falls back to source_id + external_id (legacy path)
+ *   2. source_id + external_id
+ * Only records without either explicit identity use sender/recipient/time.
  */
 async function findExistingMessage(
   client: any,
@@ -91,7 +91,11 @@ async function findExistingMessage(
     if (r.rows.length > 0) return r.rows[0];
   }
 
-  // Strategy 3: natural key (source_id + sender + recipient + timestamp)
+  // Distinct provider IDs must not collapse just because two messages were
+  // sent by the same person in the same second.
+  if (providerMsgId || external_id) return null;
+
+  // Strategy 3: natural key for legacy records without an explicit identity.
   if (sender && timestamp) {
     const r = await client.query(
       `SELECT id, record_id, content, metadata FROM messages

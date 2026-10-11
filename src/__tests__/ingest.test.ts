@@ -236,6 +236,16 @@ describe('POST /api/messages/ingest', () => {
     expect(rows.rows[0].effective_to).toBeNull();
   });
 
+  it('preserves distinct message identities within the same second', async () => {
+    const base = {source:'test',sender:'same-person',recipient:'same-chat',timestamp:'2026-10-11T12:00:00Z',content:'message'};
+    const send = (external_id: string) => request(app).post('/api/messages/ingest?conflict_mode=skip_existing')
+      .set('Authorization',`Bearer ${token}`).field('message',JSON.stringify({...base,external_id}));
+    const first=await send(crypto.randomUUID());
+    const second=await send(crypto.randomUUID());
+    expect(first.status).toBe(201);expect(second.status).toBe(201);
+    expect(second.body.message.record_id).not.toBe(first.body.message.record_id);
+  });
+
   it('returns 401 without auth', async () => {
     const res = await request(app)
       .post('/api/messages/ingest')
