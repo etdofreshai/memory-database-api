@@ -81,6 +81,15 @@ describe('direct memory API',()=>{
     expect((await request(app).post('/api/transactions/batch').set('Authorization',`Bearer ${writeToken}`).send({transactions:[payload]})).status).toBe(403);
     expect((await request(app).post('/api/transactions').set('Authorization',`Bearer ${writeToken}`).send({...payload,source_id:sourceId})).status).toBe(403);
     expect((await request(app).put('/api/sync-state/foreign').set('Authorization',`Bearer ${writeToken}`).send({source:'not-authorized'})).status).toBe(403);
+    expect((await request(app).put('/api/subscriptions/discord').set('Authorization',`Bearer ${writeToken}`).send({subscriptions:[]})).status).toBe(403);
+  });
+  it('rejects an ingestor credential without explicit source scopes',async()=>{
+    const token=crypto.randomUUID();
+    await pool.query("INSERT INTO api_tokens(token,label,permissions) VALUES($1,'unscoped test','write')",[token]);
+    try {
+      expect((await request(app).post('/api/messages').set('Authorization',`Bearer ${token}`)
+        .send({source:'memory-fixture',content:'must not be written'})).status).toBe(403);
+    } finally { await pool.query('DELETE FROM api_tokens WHERE token=$1',[token]); }
   });
   it('supports date filter aliases and legacy recipient filters',async()=>{
     const a=await get('/api/transactions?after=2026-01-01&before=2026-01-02');
