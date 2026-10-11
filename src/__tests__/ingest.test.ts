@@ -18,7 +18,7 @@ beforeAll(async () => {
   // Create test token
   token = crypto.randomBytes(16).toString('hex');
   await pool.query(
-    `INSERT INTO api_tokens (token, label, permissions) VALUES ($1, 'test-ingest', 'write')
+    `INSERT INTO api_tokens (token, label, permissions, write_sources) VALUES ($1, 'test-ingest', 'write', ARRAY['test'])
      ON CONFLICT (token) DO NOTHING`,
     [token]
   );

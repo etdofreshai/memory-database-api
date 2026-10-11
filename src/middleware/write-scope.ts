@@ -2,8 +2,8 @@ import { Response, NextFunction } from 'express';
 import pool from '../db.js';
 import { AuthRequest } from './auth.js';
 
-// Legacy unscoped tokens retain their explicit broad access. Scoped ingestors
-// cannot write other sources through alternate entity routes.
+// Auth requires explicit source scopes on all ingestor tokens. Enforce them
+// consistently across entity routes, not just message insertion.
 export async function requireSourceScope(req: AuthRequest, res: Response, next: NextFunction) {
   const scope = req.token?.permissions === 'write' ? req.token.write_sources : null;
   if (!scope) { next(); return; }
@@ -41,4 +41,11 @@ export async function requireAttachmentScope(req: AuthRequest,res: Response,next
     }
     next();
   } catch { res.status(503).json({error:'Unable to verify write scope'}); }
+}
+
+export function requireServiceScope(req: AuthRequest,res: Response,next: NextFunction) {
+  if (req.token?.permissions === 'write' && !req.token.write_sources?.includes(String(req.params.service))) {
+    res.status(403).json({error:'Token not authorized for this service'}); return;
+  }
+  next();
 }

@@ -1,3 +1,4 @@
+import { requireServiceScope } from '../middleware/write-scope.js';
 import { Router } from 'express';
 import pool from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -57,7 +58,7 @@ router.get('/:service', requireAuth('read', 'write', 'admin'), async (req, res) 
 });
 
 // PUT /api/subscriptions/settings/:service — set auto_subscribe for a service
-router.put('/:service', requireAuth('write', 'admin'), async (req, res) => {
+router.put('/:service', requireAuth('write', 'admin'), requireServiceScope, async (req, res) => {
   try {
     const service = getString(req.params.service);
     if (!isValidService(service)) {

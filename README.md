@@ -35,8 +35,8 @@ for immutable session events. Source-backed edits may use versioned append.
 `PUT /api/sync-state/:key` records per-host/per-source progress. Reader tokens
 cannot write. Source-scoped writer checks also apply to transactions, tasks,
 sync state and attachment enrichment. A shared attachment requires permission
-for every linked source. Legacy unscoped writers retain broad access and should
-be replaced with scoped ingestor credentials.
+for every linked source. All ingestor tokens require explicit source scopes. Before deployment, scope
+legacy tokens and align their source names with the ingestors.
 
 ## Deployment
 

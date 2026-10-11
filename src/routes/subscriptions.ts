@@ -1,3 +1,4 @@
+import { requireServiceScope } from '../middleware/write-scope.js';
 import { Router } from 'express';
 import pool from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -143,7 +144,7 @@ interface SubscriptionInput {
 }
 
 // PUT /api/subscriptions/:service — bulk upsert subscriptions for a service
-router.put('/:service', requireAuth('write', 'admin'), async (req, res) => {
+router.put('/:service', requireAuth('write', 'admin'), requireServiceScope, async (req, res) => {
   try {
     const service = getString(req.params.service);
     if (!isValidService(service)) {
@@ -239,7 +240,7 @@ router.put('/:service', requireAuth('write', 'admin'), async (req, res) => {
 });
 
 // PATCH /api/subscriptions/:service/:channel_id — toggle single subscription
-router.patch('/:service/:channel_id', requireAuth('write', 'admin'), async (req, res) => {
+router.patch('/:service/:channel_id', requireAuth('write', 'admin'), requireServiceScope, async (req, res) => {
   try {
     const service = getString(req.params.service);
     const channel_id = getString(req.params.channel_id);

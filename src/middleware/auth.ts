@@ -33,6 +33,9 @@ export function requireAuth(...allowed: string[]) {
         res.status(403).json({ error: 'Insufficient permissions' });
         return;
       }
+      if (row.permissions === 'write' && (!Array.isArray(row.write_sources) || !row.write_sources.length)) {
+        res.status(403).json({ error: 'Ingestor token requires explicit source scopes' }); return;
+      }
       // Update last_used_at (fire and forget)
       pool.query("UPDATE api_tokens SET last_used_at = NOW() WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '5 minutes')", [row.id]).catch(() => {});
       req.token = row;
