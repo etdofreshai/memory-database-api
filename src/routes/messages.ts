@@ -12,21 +12,21 @@ function baseTable(includeHistory: boolean): string {
 
 // Search messages
 router.get('/search', requireAuth('read', 'write', 'admin'), async (req, res) => {
-  const { q, limit = '20', offset = '0', include_history } = req.query;
-  if (!q) { res.status(400).json({ error: 'q parameter required' }); return; }
+  const { q, source, sender, recipient, after, before, limit = '20', offset = '0', include_history } = req.query;
+  if (typeof q !== 'string' || !q.trim() || q.length > 1000) { res.status(400).json({ error: 'q must contain 1–1000 characters' }); return; }
   const table = baseTable(include_history === 'true');
-  try {
-    const result = await pool.query(
-      `SELECT m.*, s.name as source_name FROM ${table} m
-       LEFT JOIN sources s ON m.source_id = s.id
-       WHERE m.content ILIKE $1
-       ORDER BY m.timestamp DESC LIMIT $2 OFFSET $3`,
-      [`%${q}%`, Number(limit), Number(offset)]
-    );
-    res.json({ messages: result.rows, total: result.rowCount });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+  const params: any[] = [`%${q}%`];
+  const conditions = ['m.content ILIKE $1'];
+  for (const [value, column, op] of [[source,'s.name','='],[sender,'m.sender','ILIKE'],[recipient,'m.recipient','ILIKE'],[after,'m.timestamp','>='],[before,'m.timestamp','<=']]) {
+    if (value) { params.push(op === 'ILIKE' ? `%${value}%` : value); conditions.push(`${column} ${op} $${params.length}`); }
   }
+  params.push(Math.max(1,Math.min(Number(limit)||20,200)),Math.max(0,Number(offset)||0));
+  try {
+    const result = await pool.query(`SELECT m.*,s.name AS source_name FROM ${table} m
+      LEFT JOIN sources s ON s.id=m.source_id WHERE ${conditions.join(' AND ')}
+      ORDER BY m.timestamp DESC,m.id DESC LIMIT $${params.length-1} OFFSET $${params.length}`,params);
+    res.json({ messages: result.rows, total: result.rowCount, returned: result.rowCount });
+  } catch (err: any) { res.status(err.code === '57014' ? 503 : 500).json({ error: 'Search failed; try a narrower query' }); }
 });
 
 // Vector search
@@ -84,6 +84,7 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
   const {
     source,
     sender,
+    recipient,
     after,
     before,
     q,
@@ -102,6 +103,7 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
 
   if (source) { conditions.push(`s.name = $${idx++}`); params.push(source); }
   if (sender) { conditions.push(`m.sender ILIKE $${idx++}`); params.push(`%${sender}%`); }
+  if (recipient) { conditions.push(`m.recipient ILIKE $${idx++}`); params.push(`%${recipient}%`); }
   if (after) { conditions.push(`m.timestamp >= $${idx++}`); params.push(after); }
   if (before) { conditions.push(`m.timestamp <= $${idx++}`); params.push(before); }
   if (q) {

@@ -1,93 +1,66 @@
-# memory-database-api
+# Memory Database API
 
-REST API for the OpenClaw memory database (messages, sources, people) with Bearer token auth and pgvector search.
+Direct, authenticated PostgreSQL-backed archive API. Local source ingestors own
+writes; people and agents read through the same HTTP API. No model service,
+vector database, or gateway is required.
 
-> **Note:** The admin UI has been moved to a standalone repo: [openclaw-memory-db-manager](https://github.com/etdofreshai/openclaw-memory-db-manager)
+## Read interface
 
-## Quick Start
+- `GET /api/memory/search?q=...`: ranked word search; optional `source`, `sender`,
+  `recipient`, `after`, `before`, `limit` (1–50), `mode=terms|phrase`, `include_noise`.
+- `GET /api/memory/records/:uuid`: original record and attachment references.
+- `GET /api/memory/records/:uuid/context?limit=5`: chronological neighbors in the
+  same source conversation, up to 20 per side. Reports missing identity.
+- `GET /api/memory/sources`: latest message timestamps and per-ingestor reports.
+- `GET /api/transactions?date_from=...&date_to=...`: structured transactions;
+  `after`/`before` are aliases. Supports merchant/category filters and pagination.
+- `GET /api/attachments?q=...`: filename/OCR/summary search.
+- `GET /api/attachments/:uuid/file`: authenticated original file retrieval.
 
-```bash
-npm install --include=dev
-cd admin && npm install --include=dev && npm run build && cd ..
+The older `/api/messages` and `/api/messages/search` routes remain compatible;
+legacy search is literal substring matching. `/api/messages/:uuid/history` is
+record version history, not conversation context. There is no vector-search route.
+
+Search excludes known injected instructions by default and downranks assistant
+progress. It returns excerpts, original IDs and context URLs, not generated claims.
+Original source text is always retained. See `skill/memory-database/` for the
+GET-only Python client and portable agent skill. Put read credentials in that
+skill's `.env` or environment; do not commit secrets.
+
+## Writes and freshness
+
+`POST /api/messages` and multipart `/api/messages/ingest` support
+`conflict_mode=skip_existing|skip_or_append|skip_or_overwrite`. Use `skip_existing`
+for immutable session events. Source-backed edits may use versioned append.
+`PUT /api/sync-state/:key` records per-host/per-source progress. Reader tokens
+cannot write. Source-scoped writer checks also apply to transactions, tasks,
+sync state and attachment enrichment. A shared attachment requires permission
+for every linked source. Legacy unscoped writers retain broad access and should
+be replaced with scoped ingestor credentials.
+
+## Deployment
+
+Requires Node.js and PostgreSQL. `DATABASE_URL` is mandatory. `PORT` defaults to
+3000. `DB_STATEMENT_TIMEOUT_MS` defaults to 15000; connection timeout is 5 seconds.
+
+```sh
+npm ci
 npm run build
-DATABASE_URL=postgresql://... npm start
+npm start
 ```
 
-## Environment Variables
+Take and verify backups before production changes. On an existing deployment,
+apply `migrations/014-memory-read.sql` with psql outside a transaction before
+deploying this version. It adds functions and concurrent partial indexes over
+current messages without rewriting archive content. Allow a longer statement
+timeout for index construction. Startup does not apply this heavy migration.
+Keep `SKIP_MIGRATIONS=true` when schema changes are managed explicitly.
 
-- `DATABASE_URL` — PostgreSQL connection string
-- `PORT` — Server port (default 3000)
-- `ADMIN_TOKEN` — Bootstrap admin token on first run
+The tests exercise the actual PostgreSQL API. Run only against a disposable
+database with the migrations and api_tokens table installed:
 
-## API Endpoints
-
-- `GET /api/health` — Health check
-- `GET /api/messages?source=&sender=&after=&before=&limit=&offset=` — List messages
-- `GET /api/messages/search?q=&limit=&offset=` — Full-text search
-- `GET /api/messages/vector-search` — pgvector similarity search
-- `POST /api/messages` — Create message (write token)
-- `POST /api/messages/ingest` — Ingest message + attachments (multipart, write token)
-
-Message writes accept `conflict_mode=skip_existing|skip_or_append|skip_or_overwrite`.
-Use `skip_existing` for insert-only ingestors: an existing `(source, external_id)`
-is returned unchanged, regardless of content or metadata differences.
-- `GET /api/sources` — List sources
-- `GET /api/people` — List people
-- `GET/POST/PATCH/DELETE /api/admin/tokens` — Token management (admin)
-- `GET /api/messages/:record_id/attachments` — Linked attachments for a message
-- `GET /api/attachments?q=&mime_type=&file_type=&privacy_level=&sha256=&record_id=&page=&limit=` — List/filter attachments
-- `GET /api/attachments/:record_id` — Single attachment + linked messages
-- `GET /api/attachments/:record_id/file` — Serve attachment file content (supports `?token=` query param for media elements)
-- `GET /api/links?message_record_id=&attachment_record_id=&provider=&role=&q=&page=&limit=` — List/filter message-attachment links
-- `/admin` — Admin dashboard
-- `/admin/viewer` — Data viewer (messages, attachments, links)
-
-## Ingest Endpoint (Attachments V1)
-
-`POST /api/messages/ingest` accepts multipart/form-data with:
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `message` | JSON string | Yes | Message object (`source`, `content`, `sender`, etc.) |
-| `files` | File(s) | No | Up to 10 binary attachments (max 1GB each) |
-| `attachments_meta` | JSON string | No | Per-file metadata array (matched by index) |
-
-```bash
-curl -X POST http://localhost:3000/api/messages/ingest \
-  -H "Authorization: Bearer $TOKEN" \
-  -F 'message={"source":"telegram","sender":"ET","content":"Check this","timestamp":"2026-03-06T14:30:00Z"}' \
-  -F 'attachments_meta=[{"original_file_name":"photo.jpg","role":"original"}]' \
-  -F 'files=@photo.jpg'
+```sh
+DATABASE_URL=postgresql://postgres@localhost:55434/postgres npm test
 ```
 
-Files are SHA-256 deduplicated and stored at `/memory/attachments/<record_id>.<ext>`.
-
-**Env vars:** `ATTACHMENT_STORAGE_PATH` (default `/memory/attachments`), `INGEST_MAX_FILE_SIZE` (default 1GB).
-
-## Admin Viewer
-
-The `/admin/viewer` page provides a tabbed interface for inspecting all three core tables:
-
-- **Messages** — searchable list with filters for source, sender/recipient, date range, and has-attachments. Click a row to see full details and linked attachments.
-- **Attachments** — searchable by filename/summary/OCR, filterable by MIME type, file type, privacy level, SHA256 hash, and record ID. Click to see linked messages.
-- **Links** — browse message↔attachment links, filter by message/attachment record ID and provider. Click for full detail with cross-references.
-
-All tabs support pagination and click-to-detail modals with raw JSON inspection.
-
-### Attachment Preview
-
-Clicking an attachment filename in any table or detail modal opens an inline preview modal with type-appropriate rendering:
-
-- **Images** (jpg, png, gif, webp, etc.) — `<img>` preview
-- **Video** (mp4, webm, mov, etc.) — `<video>` with controls
-- **Audio** (mp3, m4a, wav, amr, etc.) — `<audio>` with controls
-- **PDF** — `<iframe>` embed
-- **Other types** — download/open-in-new-tab fallback
-
-Files are served via `/api/attachments/:record_id/file` which reads from `storage_path`/`url_local` on disk. Authentication is passed via `?token=` query parameter (required for `<img>`/`<video>`/`<audio>` src attributes that can't send Authorization headers). Missing or unreachable files show an error state with an "open in new tab" fallback link.
-
-## Migrations
-
-```bash
-npm run migrate  # Run manually when ready
-```
+Operational procedures are in `docs/operations.md`.

@@ -7,6 +7,10 @@ export interface AuthRequest extends Request {
 
 export function requireAuth(...allowed: string[]) {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (req.token) {
+      if (!allowed.includes(req.token.permissions)) { res.status(403).json({ error: 'Insufficient permissions' }); return; }
+      next(); return;
+    }
     const header = req.headers.authorization;
     // Support ?token= query param for media elements (img/video/audio src can't send headers)
     const queryToken = typeof req.query.token === 'string' ? req.query.token : '';
@@ -30,7 +34,7 @@ export function requireAuth(...allowed: string[]) {
         return;
       }
       // Update last_used_at (fire and forget)
-      pool.query('UPDATE api_tokens SET last_used_at = NOW() WHERE id = $1', [row.id]);
+      pool.query("UPDATE api_tokens SET last_used_at = NOW() WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '5 minutes')", [row.id]).catch(() => {});
       req.token = row;
       next();
     } catch (err) {

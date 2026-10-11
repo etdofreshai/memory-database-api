@@ -1,3 +1,4 @@
+import { requireSourceScope } from '../middleware/write-scope.js';
 import { Router } from 'express';
 import pool from '../db.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
@@ -12,11 +13,13 @@ function baseTable(includeHistory: boolean): string {
 router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
   const {
     source_id, category, subcategory, merchant, account_name, account_type,
-    transaction_type, status, date_from, date_to, currency,
+    transaction_type, status, date_from: fromDate, date_to: toDate, after, before, currency,
     q, page, limit = '50', offset, sort = 'date', order = 'desc',
     include_history
   } = req.query;
 
+  const date_from = fromDate || after;
+  const date_to = toDate || before;
   const table = baseTable(include_history === 'true');
   const conditions: string[] = [];
   const params: any[] = [];
@@ -166,7 +169,7 @@ router.get('/:record_id', requireAuth('read', 'write', 'admin'), async (req, res
 });
 
 // Create/upsert transaction (SCD Type 2)
-router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) => {
+router.post('/', requireAuth('write', 'admin'), requireSourceScope, async (req: AuthRequest, res) => {
   const {
     source, source_id: bodySrcId, external_id, date, amount, currency, merchant,
     category, subcategory, account_name, account_type, transaction_type,
@@ -275,7 +278,7 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
 });
 
 // Batch upsert (for ingestor)
-router.post('/batch', requireAuth('write', 'admin'), async (req: AuthRequest, res) => {
+router.post('/batch', requireAuth('write', 'admin'), requireSourceScope, async (req: AuthRequest, res) => {
   const { transactions } = req.body;
   if (!Array.isArray(transactions) || transactions.length === 0) {
     res.status(400).json({ error: 'transactions array required' }); return;

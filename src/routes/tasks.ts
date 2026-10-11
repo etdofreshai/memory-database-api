@@ -1,3 +1,4 @@
+import { requireSourceScope } from '../middleware/write-scope.js';
 import { Router } from 'express';
 import pool from '../db.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
@@ -89,7 +90,7 @@ router.get('/:record_id', requireAuth('read', 'write', 'admin'), async (req, res
 });
 
 // Create/upsert task (SCD Type 2)
-router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) => {
+router.post('/', requireAuth('write', 'admin'), requireSourceScope, async (req: AuthRequest, res) => {
   const {
     source, source_id: bodySrcId, external_id, title, description,
     status, priority, assignee, reporter, project, labels,

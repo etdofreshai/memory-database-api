@@ -1,3 +1,4 @@
+import { requireAttachmentScope } from '../middleware/write-scope.js';
 import { Router } from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -159,7 +160,7 @@ router.get('/:record_id/file', requireAuth('read', 'write', 'admin'), async (req
 });
 
 // PATCH attachment enrichment fields by record_id
-router.patch('/:record_id', requireAuth('write', 'admin'), async (req, res) => {
+router.patch('/:record_id', requireAuth('write', 'admin'), requireAttachmentScope, async (req, res) => {
   const { record_id } = req.params;
   const allowedFields = ['summary_text', 'summary_model', 'summary_updated_at', 'labels', 'ocr_text', 'user_notes', 'metadata'];
   const updates: string[] = [];

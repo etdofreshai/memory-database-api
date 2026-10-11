@@ -7,7 +7,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "migrate": "tsx src/migrate.ts",
-    "test": "vitest run"
+    "test": "vitest run src"
   },
   "dependencies": {
     "@types/multer": "^2.1.0",

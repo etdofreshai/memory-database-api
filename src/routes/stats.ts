@@ -19,10 +19,10 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (_req, res) => {
           relname AS table_name,
           pg_total_relation_size(relid)::bigint AS total_bytes,
           pg_size_pretty(pg_total_relation_size(relid)) AS total_pretty,
-          pg_relation_size(relid)::bigint AS table_bytes,
-          pg_size_pretty(pg_relation_size(relid)) AS table_pretty,
-          (pg_total_relation_size(relid) - pg_relation_size(relid))::bigint AS index_bytes,
-          pg_size_pretty(pg_total_relation_size(relid) - pg_relation_size(relid)) AS index_pretty
+          pg_table_size(relid)::bigint AS table_bytes,
+          pg_size_pretty(pg_table_size(relid)) AS table_pretty,
+          pg_indexes_size(relid)::bigint AS index_bytes,
+          pg_size_prettypg_indexes_size(relid) AS index_pretty
         FROM pg_catalog.pg_statio_user_tables
         ORDER BY pg_total_relation_size(relid) DESC
         LIMIT 25

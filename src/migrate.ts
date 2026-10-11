@@ -11,7 +11,10 @@ async function migrate() {
   for (const file of files) {
     console.log(`Running migration: ${file}`);
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
-    await pool.query(sql);
+    // Concurrent index builds must be separate protocol messages/transactions.
+    for (const statement of sql.split(/(CREATE INDEX CONCURRENTLY[\s\S]*?;)/)) {
+      if (statement.trim()) await pool.query(statement);
+    }
     console.log(`  ✅ Done`);
   }
   await pool.end();

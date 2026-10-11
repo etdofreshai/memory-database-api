@@ -10,6 +10,9 @@ router.get('/', async (_req, res) => {
       status: 'ok',
       timestamp: new Date().toISOString(),
       capabilities: {
+        memory_read_api: 1,
+        search_modes: ['terms', 'phrase'],
+        conversation_context: true,
         message_conflict_modes: ['skip_existing', 'skip_or_append', 'skip_or_overwrite'],
       },
     });

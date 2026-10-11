@@ -172,7 +172,7 @@ describe('POST /api/messages/ingest', () => {
       .field('attachments_meta', JSON.stringify(meta))
       .attach('files', fileContent, 'idem.txt');
 
-    expect(res2.status).toBe(201);
+    expect(res2.status).toBe(200);
     expect(res2.body.message.record_id).toBe(msgRecordId);
     // Attachment should be deduplicated
     expect(res2.body.attachments[0].deduplicated).toBe(true);

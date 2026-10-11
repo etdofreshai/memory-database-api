@@ -20,6 +20,7 @@ import subscriptionsRouter from './routes/subscriptions.js';
 import transactionsRouter from './routes/transactions.js';
 import tasksRouter from './routes/tasks.js';
 import syncStateRouter from './routes/sync-state.js';
+import memoryRouter from './routes/memory.js';
 
 const app = express();
 
@@ -37,6 +38,7 @@ app.get('/imessage', (_req, res) => {
 
 // API routes
 app.use('/api/health', healthRouter);
+app.use('/api/memory', memoryRouter);
 app.use('/api/messages/ingest', ingestRouter);
 app.use('/api/messages', messagesRouter);
 app.use('/api/sources', sourcesRouter);

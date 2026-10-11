@@ -1,3 +1,4 @@
+import { requireSourceScope } from '../middleware/write-scope.js';
 import { Router } from 'express';
 import pool from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -20,7 +21,7 @@ router.get('/:key', requireAuth('read', 'write', 'admin'), async (req, res) => {
 });
 
 // Upsert sync state
-router.put('/:key', requireAuth('write', 'admin'), async (req, res) => {
+router.put('/:key', requireAuth('write', 'admin'), requireSourceScope, async (req, res) => {
   const { key } = req.params;
   const { source, last_sync_date, last_record_date, total_records, last_run_at, error_message, metadata } = req.body;
 
