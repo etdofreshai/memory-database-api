@@ -101,7 +101,7 @@ router.get('/', requireAuth('read', 'write', 'admin'), async (req, res) => {
   const params: any[] = [];
   let idx = 1;
 
-  if (source) { conditions.push(`s.name = $${idx++}`); params.push(source); }
+  if (source) { conditions.push(`m.source_id = (SELECT id FROM sources WHERE name = $${idx++})`); params.push(source); }
   if (sender) { conditions.push(`m.sender ILIKE $${idx++}`); params.push(`%${sender}%`); }
   if (recipient) { conditions.push(`m.recipient ILIKE $${idx++}`); params.push(`%${recipient}%`); }
   if (after) { conditions.push(`m.timestamp >= $${idx++}`); params.push(after); }
