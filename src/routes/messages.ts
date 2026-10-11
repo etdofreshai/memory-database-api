@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { isDeepStrictEqual } from 'node:util';
-import pool from '../db.js';
+import pool, { connectForWrite } from '../db.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
@@ -186,7 +186,8 @@ router.post('/', requireAuth('write', 'admin'), async (req: AuthRequest, res) =>
     }
   }
 
-  const client = await pool.connect();
+  const client = await connectForWrite(res);
+  if (!client) return;
   try {
     await client.query('BEGIN');
 

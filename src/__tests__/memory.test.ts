@@ -1,7 +1,7 @@
-import { beforeAll, afterAll, describe, it, expect } from 'vitest';
+import { beforeAll, afterAll, describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
 import crypto from 'node:crypto';
-import pool from '../db.js';
+import pool, { connectForWrite } from '../db.js';
 import app from '../app.js';
 
 const readToken = crypto.randomUUID();
@@ -35,6 +35,15 @@ afterAll(async () => {
 const get=(url:string) => request(app).get(url).set('Authorization',`Bearer ${readToken}`);
 
 describe('direct memory API',()=>{
+  it('returns a retryable response when the write pool cannot connect',async()=>{
+    const connect=vi.spyOn(pool,'connect').mockRejectedValueOnce(new Error('pool unavailable'));
+    const res:any={status:vi.fn().mockReturnThis(),json:vi.fn().mockReturnThis()};
+    try {
+      expect(await connectForWrite(res)).toBeNull();
+      expect(res.status).toHaveBeenCalledWith(503);
+      expect(res.json).toHaveBeenCalledWith({error:'Database temporarily unavailable',retryable:true});
+    } finally { connect.mockRestore(); }
+  });
   it('finds separated terms, enforces source and recipient, and excludes injected instructions',async()=>{
     const r=await get('/api/memory/search?q=orchid%20backup&source=memory-fixture&recipient=Bob');
     expect(r.status).toBe(200); expect(r.body.returned).toBe(4);

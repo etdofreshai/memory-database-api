@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { isDeepStrictEqual } from 'node:util';
-import pool from '../db.js';
+import pool, { connectForWrite } from '../db.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
@@ -163,7 +163,8 @@ router.post('/', requireAuth('write', 'admin'), upload.array('files', MAX_FILES)
   const files = (req.files as Express.Multer.File[]) || [];
   const writtenFiles: string[] = []; // track for rollback cleanup
 
-  const client = await pool.connect();
+  const client = await connectForWrite(res);
+  if (!client) return;
   try {
     await client.query('BEGIN');
 

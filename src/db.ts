@@ -1,4 +1,5 @@
 import pg from 'pg';
+import type { Response } from 'express';
 
 if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required');
 const pool = new pg.Pool({
@@ -10,4 +11,11 @@ const pool = new pg.Pool({
   keepAlive: true,
 });
 pool.on('error', (error) => console.error('Idle database connection failed:', error.message));
+export async function connectForWrite(res: Response): Promise<pg.PoolClient | null> {
+  try { return await pool.connect(); }
+  catch {
+    res.status(503).json({error:'Database temporarily unavailable',retryable:true});
+    return null;
+  }
+}
 export default pool;

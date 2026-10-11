@@ -1,6 +1,6 @@
 import { requireSourceScope } from '../middleware/write-scope.js';
 import { Router } from 'express';
-import pool from '../db.js';
+import pool, { connectForWrite } from '../db.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
 
 const router = Router();
@@ -180,7 +180,8 @@ router.post('/', requireAuth('write', 'admin'), requireSourceScope, async (req: 
     res.status(400).json({ error: 'date and amount are required' }); return;
   }
 
-  const client = await pool.connect();
+  const client = await connectForWrite(res);
+  if (!client) return;
   try {
     await client.query('BEGIN');
 
@@ -288,7 +289,8 @@ router.post('/batch', requireAuth('write', 'admin'), requireSourceScope, async (
   }
 
   const results = { new: 0, updated: 0, skipped: 0 };
-  const client = await pool.connect();
+  const client = await connectForWrite(res);
+  if (!client) return;
 
   try {
     await client.query('BEGIN');
