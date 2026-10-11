@@ -88,7 +88,7 @@ router.get('/sources', async (req,res) => {
     validate(req.query, []);
     const result = await pool.query(`SELECT s.id,s.name,m.timestamp AS latest_message_at,m.created_at AS latest_message_ingested_at
       FROM sources s LEFT JOIN LATERAL (
-        SELECT timestamp,created_at FROM current_messages WHERE source_id=s.id ORDER BY timestamp DESC,id DESC LIMIT 1
+        SELECT timestamp,created_at FROM current_messages WHERE source_id=s.id AND timestamp IS NOT NULL ORDER BY timestamp DESC,id DESC LIMIT 1
       ) m ON TRUE ORDER BY s.name`);
     const sync = await pool.query('SELECT key,source,last_run_at,last_sync_date,last_record_date,error_message,metadata,updated_at FROM sync_state ORDER BY source,key');
     res.json({ sources: result.rows, ingestors: sync.rows, checked_at: new Date().toISOString(),

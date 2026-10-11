@@ -13,8 +13,10 @@ Preserve the service specifications and record the backup start/completion times
 The attachment archive is a file copy, not an atomic cross-resource snapshot.
 Do not delete or rewrite attachments while this copy is running.
 
-Verify hashes, `pg_restore --list`, complete archive decoding, and `gzip -t`/
-`tar -tzf`. These checks are not a full restore drill. A full restore into an
+Verify hashes, `pg_restore --list`, complete archive decoding, and compression
+integrity (`zstd -t` or `gzip -t`). Read the tar inventory and compare all
+referenced attachment paths and byte sizes against the database manifest.
+These checks are not a full restore drill. A full restore into an
 isolated database should be identified separately when performed.
 
 ## Search upgrade

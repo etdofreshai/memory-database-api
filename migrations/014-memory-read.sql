@@ -17,6 +17,8 @@ LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
 $$;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS memory_current_id
   ON messages (id) WHERE effective_to IS NULL AND is_active = TRUE;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS memory_current_record
+  ON messages (record_id) WHERE effective_to IS NULL AND is_active = TRUE;
 CREATE INDEX CONCURRENTLY IF NOT EXISTS memory_current_source_time
   ON messages (source_id, timestamp DESC, id DESC)
   WHERE effective_to IS NULL AND is_active = TRUE;
